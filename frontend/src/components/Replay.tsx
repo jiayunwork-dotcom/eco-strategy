@@ -228,7 +228,11 @@ function computeTerritoryData(snapshots: ReplayData['snapshots']) {
       if (!playerTerritory[pid]) {
         playerTerritory[pid] = { name: player.name, color: player.color, data: [] };
       }
-      playerTerritory[pid].data.push(cellCounts[pid] || 0);
+      if (!player.is_alive) {
+        playerTerritory[pid].data.push(0);
+      } else {
+        playerTerritory[pid].data.push(cellCounts[pid] || 0);
+      }
     }
   }
 
@@ -245,6 +249,11 @@ function computeBiodiversityData(snapshots: ReplayData['snapshots']) {
     for (const [pid, player] of Object.entries(snap.state.players)) {
       if (!playerBio[pid]) {
         playerBio[pid] = { name: player.name, color: player.color, data: [] };
+      }
+
+      if (!player.is_alive) {
+        playerBio[pid].data.push(0);
+        continue;
       }
 
       const playerCells = Object.values(snap.state.cells).filter(c => c.owner_id === pid);
@@ -417,32 +426,49 @@ function BarChart({ data }: { data: { name: string; count: number; color: string
 }
 
 function ClimateTimeline({ events, maxTurn }: { events: { turn: number; events: ClimateEvent[] }[]; maxTurn: number }) {
-  const svgH = 50;
+  const svgH = 80;
   const plotW = CHART_W - CHART_PAD_L - CHART_PAD_R;
+  const midY = svgH / 2;
+
+  const flatEvents: { turn: number; event: ClimateEvent; indexInTurn: number; totalInTurn: number }[] = [];
+  for (const ev of events) {
+    for (let i = 0; i < ev.events.length; i++) {
+      flatEvents.push({
+        turn: ev.turn,
+        event: ev.events[i],
+        indexInTurn: i,
+        totalInTurn: ev.events.length,
+      });
+    }
+  }
 
   return (
     <svg width={CHART_W} height={svgH} style={{ display: 'block' }}>
       <line
-        x1={CHART_PAD_L} y1={svgH / 2} x2={CHART_PAD_L + plotW} y2={svgH / 2}
+        x1={CHART_PAD_L} y1={midY} x2={CHART_PAD_L + plotW} y2={midY}
         stroke="#1a3a5c" strokeWidth={1}
       />
 
-      {events.map((ev, i) => {
-        const x = CHART_PAD_L + (ev.turn / Math.max(maxTurn, 1)) * plotW;
-        const icon = ev.events[0] ? (CLIMATE_ICONS[ev.events[0].type] || '⚡') : '⚡';
+      {flatEvents.map((fe, i) => {
+        const x = CHART_PAD_L + (fe.turn / Math.max(maxTurn, 1)) * plotW;
+        const icon = CLIMATE_ICONS[fe.event.type] || '⚡';
+        const offsetStep = 16;
+        const centerOffset = (fe.totalInTurn - 1) / 2;
+        const yOffset = (fe.indexInTurn - centerOffset) * offsetStep;
+
         return (
           <g key={i}>
-            <line x1={x} y1={svgH / 2 - 10} x2={x} y2={svgH / 2 + 10} stroke="#f39c12" strokeWidth={1} />
-            <text x={x} y={svgH / 2 - 14} textAnchor="middle" fontSize="11">{icon}</text>
-            <text x={x} y={svgH / 2 + 20} textAnchor="middle" fontSize="8" fill="#5a7a9a">
-              T{ev.turn}
+            <line x1={x} y1={midY - 6} x2={x} y2={midY + 6} stroke="#f39c12" strokeWidth={1} />
+            <text x={x} y={midY + yOffset - 6} textAnchor="middle" fontSize="11">{icon}</text>
+            <text x={x} y={midY + yOffset + 6} textAnchor="middle" fontSize="8" fill="#5a7a9a">
+              T{fe.turn}
             </text>
           </g>
         );
       })}
 
-      <text x={CHART_PAD_L} y={svgH - 2} fontSize="8" fill="#5a7a9a">0</text>
-      <text x={CHART_PAD_L + plotW} y={svgH - 2} textAnchor="end" fontSize="8" fill="#5a7a9a">{maxTurn}</text>
+      <text x={CHART_PAD_L} y={svgH - 4} fontSize="8" fill="#5a7a9a">0</text>
+      <text x={CHART_PAD_L + plotW} y={svgH - 4} textAnchor="end" fontSize="8" fill="#5a7a9a">{maxTurn}</text>
     </svg>
   );
 }

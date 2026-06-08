@@ -480,29 +480,92 @@ pub async fn game_ws(
 }
 
 pub async fn list_games(data: web::Data<AppState>) -> HttpResponse {
-    let games = data.games.lock().unwrap();
-    let mut game_list: Vec<serde_json::Value> = Vec::new();
+    let (in_memory_games, in_memory_ids): (Vec<serde_json::Value>, Vec<Uuid>) = {
+        let games = data.games.lock().unwrap();
+        let mut game_list = Vec::new();
+        let mut ids = Vec::new();
 
-    for game in games.values() {
-        let player_names: Vec<String> = game
-            .players
-            .values()
-            .map(|p| p.name.clone())
-            .collect();
+        for game in games.values() {
+            ids.push(game.id);
+            let player_names: Vec<String> = game
+                .players
+                .values()
+                .map(|p| p.name.clone())
+                .collect();
 
-        game_list.push(serde_json::json!({
-            "id": game.id,
-            "name": game.name,
-            "status": format!("{:?}", game.status),
-            "current_turn": game.current_turn,
-            "max_turns": game.max_turns,
-            "max_players": game.max_players,
-            "player_count": game.players.len(),
+            game_list.push(serde_json::json!({
+                "id": game.id,
+                "name": game.name,
+                "status": format!("{:?}", game.status),
+                "current_turn": game.current_turn,
+                "max_turns": game.max_turns,
+                "max_players": game.max_players,
+                "player_count": game.players.len(),
+                "player_names": player_names,
+            }));
+        }
+
+        (game_list, ids)
+    };
+
+    let in_memory_ids_set: std::collections::HashSet<Uuid> = in_memory_ids.iter().copied().collect();
+
+    let db_games = match sqlx::query_as::<_, (Uuid, i32, Value)>(
+        "SELECT DISTINCT ON (game_id) game_id, turn_number, state_json \
+         FROM game_snapshots \
+         ORDER BY game_id, turn_number DESC"
+    )
+    .fetch_all(&data.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            log::warn!("Failed to query game_snapshots for list: {}", e);
+            Vec::new()
+        }
+    };
+
+    let mut db_game_list: Vec<serde_json::Value> = Vec::new();
+    let mut seen_ids = in_memory_ids_set;
+
+    for (game_id, last_turn, state_json) in db_games {
+        if seen_ids.contains(&game_id) {
+            continue;
+        }
+        seen_ids.insert(game_id);
+
+        let name = state_json.get("name").and_then(|v| v.as_str()).unwrap_or("Unknown");
+        let status = state_json.get("status").and_then(|v| v.as_str()).unwrap_or("Finished");
+        let max_turns = state_json.get("max_turns").and_then(|v| v.as_u64()).unwrap_or(50) as u32;
+        let max_players = state_json.get("max_players").and_then(|v| v.as_u64()).unwrap_or(4) as u8;
+
+        let player_names: Vec<String> = state_json
+            .get("players")
+            .and_then(|p| p.as_object())
+            .map(|obj| {
+                obj.values()
+                    .filter_map(|v| v.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let player_count = player_names.len();
+
+        db_game_list.push(serde_json::json!({
+            "id": game_id,
+            "name": name,
+            "status": status,
+            "current_turn": last_turn,
+            "max_turns": max_turns,
+            "max_players": max_players,
+            "player_count": player_count,
             "player_names": player_names,
         }));
     }
 
-    HttpResponse::Ok().json(game_list)
+    let mut all_games = in_memory_games;
+    all_games.extend(db_game_list);
+    HttpResponse::Ok().json(all_games)
 }
 
 pub async fn get_replay(

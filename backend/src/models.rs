@@ -346,11 +346,11 @@ pub struct MutationEvent {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DriftEvent {
-    pub cell: (i32, i32),
     pub species_id: Uuid,
     pub species_name: String,
     pub drifted_genes: Vec<usize>,
-    pub population_count: f64,
+    pub min_population_count: f64,
+    pub trigger_cells: Vec<(i32, i32)>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

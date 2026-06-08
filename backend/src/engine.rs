@@ -705,30 +705,37 @@ pub fn try_mutations(
 }
 
 pub fn apply_genetic_drift(
-    cell: &mut HexCell,
+    cells: &mut HashMap<(i32, i32), HexCell>,
     species_catalog: &mut Vec<Species>,
 ) -> Vec<DriftEvent> {
     let mut drift_events = Vec::new();
     let mut rng = rand::thread_rng();
 
-    let pop_data: Vec<(Uuid, f64)> = cell
-        .populations
-        .iter()
-        .map(|p| (p.species_id, p.count))
-        .collect();
-
-    for (species_id, count) in &pop_data {
-        if *count >= 20.0 {
-            continue;
+    let mut species_cell_data: HashMap<Uuid, Vec<((i32, i32), f64)>> = HashMap::new();
+    for (key, cell) in cells.iter() {
+        for pop in &cell.populations {
+            if pop.count < 20.0 {
+                species_cell_data
+                    .entry(pop.species_id)
+                    .or_default()
+                    .push((*key, pop.count));
+            }
         }
+    }
 
+    for (species_id, cell_pops) in &species_cell_data {
         let species_idx = match species_catalog.iter().position(|s| s.id == *species_id) {
             Some(idx) => idx,
             None => continue,
         };
 
         let species_name = species_catalog[species_idx].name.clone();
-        let (prob, stddev) = if *count < 10.0 {
+        let min_count = cell_pops
+            .iter()
+            .map(|(_, c)| *c)
+            .fold(f64::INFINITY, f64::min);
+
+        let (prob, stddev) = if min_count < 10.0 {
             (0.15, 0.1)
         } else {
             (0.05, 0.05)
@@ -751,11 +758,11 @@ pub fn apply_genetic_drift(
         if !drifted_positions.is_empty() {
             species_catalog[species_idx].derive_attributes_from_genes();
             drift_events.push(DriftEvent {
-                cell: (cell.q, cell.r),
                 species_id: *species_id,
                 species_name,
                 drifted_genes: drifted_positions,
-                population_count: *count,
+                min_population_count: min_count,
+                trigger_cells: cell_pops.iter().map(|(k, _)| *k).collect(),
             });
         }
     }

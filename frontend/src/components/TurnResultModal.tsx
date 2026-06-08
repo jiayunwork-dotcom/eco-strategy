@@ -264,7 +264,7 @@ export default function TurnResultModal({ result, onDismiss, players }: TurnResu
                   </span>
                 </span>
                 <span style={{ fontSize: '10px', color: '#5a7a9a' }}>
-                  Cell ({evt.cell[0]},{evt.cell[1]}) · Pop {Math.round(evt.population_count)}
+                  Cells {evt.trigger_cells.map(c => `(${c[0]},${c[1]})`).join(' ')} · Min Pop {Math.round(evt.min_population_count)}
                 </span>
               </div>
             ))}

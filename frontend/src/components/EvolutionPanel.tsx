@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { Species, GameState, TROPHIC_COLORS, TrophicLevel, GENE_NAMES, MutationHistoryEntry } from '../types';
 
 interface EvolutionPanelProps {
@@ -266,6 +266,7 @@ export default function EvolutionPanel({ gameState, mutationHistory }: Evolution
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [timelineHover, setTimelineHover] = useState<{ turn: number; idx: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const timelineScrollRef = useRef<HTMLDivElement>(null);
 
   const treeNodes = useMemo(() => buildTree(gameState), [gameState]);
 
@@ -313,6 +314,12 @@ export default function EvolutionPanel({ gameState, mutationHistory }: Evolution
     if (!selectedId) return null;
     return allNodes.find(n => n.species.id === selectedId) || null;
   }, [selectedId, allNodes]);
+
+  useEffect(() => {
+    if (timelineScrollRef.current && mutationHistory.length > 0) {
+      timelineScrollRef.current.scrollLeft = timelineScrollRef.current.scrollWidth;
+    }
+  }, [mutationHistory]);
 
   if (treeNodes.length === 0) {
     return (
@@ -457,40 +464,48 @@ export default function EvolutionPanel({ gameState, mutationHistory }: Evolution
       {mutationHistory.length > 0 && (
         <div style={styles.timelineContainer}>
           <div style={styles.timelineTitle}>Mutation Timeline</div>
-          <div style={{ position: 'relative', height: '36px', overflow: 'hidden' }}>
-            <svg
-              width="100%"
-              height="36"
-              viewBox={`0 0 ${Math.max(300, mutationHistory[mutationHistory.length - 1].turn * 12 + 20)} 36`}
-              preserveAspectRatio="xMinYMin meet"
-              style={{ display: 'block' }}
-            >
-              <line
-                x1={0} y1={18}
-                x2={Math.max(300, mutationHistory[mutationHistory.length - 1].turn * 12 + 20)}
-                y2={18}
-                stroke="#1a3a5c"
-                strokeWidth={1}
-              />
-              {mutationHistory.map((entry, idx) => {
-                const cx = entry.turn * 12 + 10;
-                const isHovered = timelineHover?.turn === entry.turn && timelineHover?.idx === idx;
-                return (
-                  <circle
-                    key={idx}
-                    cx={cx}
-                    cy={18}
-                    r={isHovered ? 5 : 3}
-                    fill={entry.is_artificial ? '#f39c12' : '#3498db'}
-                    stroke={isHovered ? '#fff' : 'none'}
+          <div
+            ref={timelineScrollRef}
+            style={{ overflowX: 'auto', overflowY: 'hidden', height: '36px' }}
+          >
+            {(() => {
+              const maxTurn = mutationHistory[mutationHistory.length - 1].turn;
+              const pxPerTurn = 12;
+              const svgW = Math.max(300, (maxTurn + 2) * pxPerTurn);
+              return (
+                <svg
+                  width={svgW}
+                  height="36"
+                  style={{ display: 'block', minWidth: svgW }}
+                >
+                  <line
+                    x1={0} y1={18}
+                    x2={svgW}
+                    y2={18}
+                    stroke="#1a3a5c"
                     strokeWidth={1}
-                    style={{ cursor: 'pointer' }}
-                    onMouseEnter={() => setTimelineHover({ turn: entry.turn, idx })}
-                    onMouseLeave={() => setTimelineHover(null)}
                   />
-                );
-              })}
-            </svg>
+                  {mutationHistory.map((entry, idx) => {
+                    const cx = (entry.turn + 1) * pxPerTurn;
+                    const isHovered = timelineHover?.turn === entry.turn && timelineHover?.idx === idx;
+                    return (
+                      <circle
+                        key={idx}
+                        cx={cx}
+                        cy={18}
+                        r={isHovered ? 5 : 3}
+                        fill={entry.is_artificial ? '#f39c12' : '#3498db'}
+                        stroke={isHovered ? '#fff' : 'none'}
+                        strokeWidth={1}
+                        style={{ cursor: 'pointer' }}
+                        onMouseEnter={() => setTimelineHover({ turn: entry.turn, idx })}
+                        onMouseLeave={() => setTimelineHover(null)}
+                      />
+                    );
+                  })}
+                </svg>
+              );
+            })()}
           </div>
           {timelineHover && (() => {
             const entry = mutationHistory[timelineHover.idx];

@@ -150,11 +150,11 @@ export interface MutationEvent {
 }
 
 export interface DriftEvent {
-  cell: [number, number];
   species_id: string;
   species_name: string;
   drifted_genes: number[];
-  population_count: number;
+  min_population_count: number;
+  trigger_cells: [number, number][];
 }
 
 export interface TurnResult {

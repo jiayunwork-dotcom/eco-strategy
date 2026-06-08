@@ -265,12 +265,8 @@ pub fn process_turn(game: &mut GameState) -> TurnResult {
         }
     }
 
-    for key in &cell_keys {
-        if let Some(cell) = game.cells.get_mut(key) {
-            let drifts = engine::apply_genetic_drift(cell, &mut game.species_catalog);
-            drift_events.extend(drifts);
-        }
-    }
+    let drifts = engine::apply_genetic_drift(&mut game.cells, &mut game.species_catalog);
+    drift_events.extend(drifts);
 
     for key in &cell_keys {
         if let Some(cell) = game.cells.get_mut(key) {

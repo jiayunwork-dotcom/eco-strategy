@@ -11,26 +11,22 @@ use std::sync::Mutex;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    dotenv::dotenv().ok();
     env_logger::init();
 
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://eco:eco_secret@localhost:5432/eco_strategy".to_string()
-    });
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://eco:eco_secret@db:5432/eco_strategy".to_string());
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&database_url)
         .await
         .unwrap_or_else(|e| {
-            log::warn!("Database connection failed: {}. Running without DB.", e);
-            panic!("Database unavailable")
+            log::warn!("Database connection failed: {}. Running in memory-only mode.", e);
+            PgPoolOptions::new()
+                .max_connections(1)
+                .connect_lazy(&database_url)
+                .expect("Failed to create lazy pool")
         });
-
-    match sqlx::query("SELECT 1").execute(&pool).await {
-        Ok(_) => log::info!("Database connected"),
-        Err(e) => log::warn!("Database query failed: {}", e),
-    }
 
     let app_state = web::Data::new(AppState {
         games: Mutex::new(HashMap::new()),

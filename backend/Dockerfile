@@ -2,7 +2,8 @@ FROM rust:1.82-alpine AS builder
 RUN apk add --no-cache musl-dev
 WORKDIR /app
 COPY Cargo.toml ./
-RUN mkdir src && echo "fn main(){}" > src/main.rs && cargo build --release 2>/dev/null; rm -rf src
+RUN mkdir src && echo "fn main(){}" > src/main.rs && cargo build --release || true
+RUN rm -rf src
 COPY src ./src
 RUN touch src/main.rs && cargo build --release
 

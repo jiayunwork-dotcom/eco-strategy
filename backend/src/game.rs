@@ -60,7 +60,6 @@ pub fn generate_map(player_count: usize, radius: i32) -> HashMap<(i32, i32), Hex
 
 pub fn initialize_species_catalog() -> (Vec<Species>, HashMap<(Uuid, Uuid), PredationEntry>) {
     let mut catalog = Vec::new();
-    let mut rng = rand::thread_rng();
 
     let producers = vec![
         ("Oak Tree", 0.05, 5.0, 0.7, (10.0, 30.0), (40.0, 80.0), 500),

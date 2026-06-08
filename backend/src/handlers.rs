@@ -1,6 +1,6 @@
-use actix::{Actor, Addr, Context, Handler, Message, StreamHandler};
+use actix::{Actor, Addr, Handler, Message, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
-use actix_web_actors::ws as actix_ws;
+use actix_web_actors::ws;
 use serde::Deserialize;
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -13,7 +13,7 @@ use crate::game::{
 };
 use crate::models::{
     GameStatus, GameState, Player, PlayerAction, PlayerActionType, Population, TrophicLevel,
-    TurnResult, VictoryResult, ClimateState,
+    TurnResult, ClimateState,
 };
 
 pub struct AppState {
@@ -305,7 +305,7 @@ pub struct GameSession {
 }
 
 impl Actor for GameSession {
-    type Context = Context<Self>;
+    type Context = ws::WebsocketContext<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
         let addr = ctx.address();
@@ -325,11 +325,11 @@ impl Actor for GameSession {
     }
 }
 
-impl StreamHandler<Result<actix_ws::Message, actix_ws::ProtocolError>> for GameSession {
+impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for GameSession {
     fn handle(
         &mut self,
-        msg: Result<actix_ws::Message, actix_ws::ProtocolError>,
-        ctx: &mut Context<Self>,
+        msg: Result<ws::Message, ws::ProtocolError>,
+        ctx: &mut ws::WebsocketContext<Self>,
     ) {
         let msg = match msg {
             Ok(msg) => msg,
@@ -340,7 +340,7 @@ impl StreamHandler<Result<actix_ws::Message, actix_ws::ProtocolError>> for GameS
         };
 
         match msg {
-            actix_ws::Message::Text(text) => {
+            ws::Message::Text(text) => {
                 let ws_msg: WsMessage = match serde_json::from_str(&text) {
                     Ok(m) => m,
                     Err(_) => return,
@@ -374,7 +374,7 @@ impl StreamHandler<Result<actix_ws::Message, actix_ws::ProtocolError>> for GameS
                     }
                 }
             }
-            actix_ws::Message::Close(_) => {
+            ws::Message::Close(_) => {
                 ctx.stop();
             }
             _ => {}
@@ -389,7 +389,7 @@ pub struct WsOut(pub String);
 impl Handler<WsOut> for GameSession {
     type Result = ();
 
-    fn handle(&mut self, msg: WsOut, ctx: &mut Context<Self>) {
+    fn handle(&mut self, msg: WsOut, ctx: &mut ws::WebsocketContext<Self>) {
         ctx.text(msg.0);
     }
 }
@@ -423,8 +423,7 @@ pub async fn game_ws(
     {
         let games = data.games.lock().unwrap();
         if !games.contains_key(&game_id) {
-            return Ok(HttpResponse::NotFound()
-                .json(serde_json::json!({ "error": "Game not found" })));
+            return Ok(HttpResponse::NotFound().finish());
         }
     }
 
@@ -434,5 +433,5 @@ pub async fn game_ws(
         state: data,
     };
 
-    actix_ws::start(session, &req, stream)
+    ws::start(session, &req, stream)
 }

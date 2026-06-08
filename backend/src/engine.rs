@@ -296,7 +296,6 @@ pub fn apply_climate_event(
     match event {
         ClimateEvent::Drought => {
             for cell in game.cells.values_mut() {
-                let old_humidity = cell.humidity;
                 cell.humidity = (cell.humidity * 0.7).max(0.0);
 
                 if matches!(cell.biome, Biome::Wetland | Biome::Ocean) {

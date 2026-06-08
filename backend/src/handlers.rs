@@ -2,6 +2,7 @@ use actix::{Actor, Addr, Handler, Message, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
 use serde::Deserialize;
+use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -261,6 +262,29 @@ pub async fn submit_action(
     }
 }
 
+async fn save_snapshot(db: &PgPool, game_id: Uuid, turn_number: u32, state: &GameState) {
+    let state_json = match serde_json::to_value(state) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("Failed to serialize game state for snapshot: {}", e);
+            return;
+        }
+    };
+
+    match sqlx::query(
+        "INSERT INTO game_snapshots (game_id, turn_number, state_json) VALUES ($1, $2, $3) ON CONFLICT (game_id, turn_number) DO UPDATE SET state_json = $3"
+    )
+    .bind(game_id)
+    .bind(turn_number as i32)
+    .bind(state_json)
+    .execute(db)
+    .await
+    {
+        Ok(_) => {}
+        Err(e) => log::warn!("Failed to save game snapshot: {}", e),
+    }
+}
+
 pub async fn advance_turn(
     data: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -291,6 +315,15 @@ pub async fn advance_turn(
         if let Some(_vr) = check_victory(game) {
             game.status = GameStatus::Finished;
         }
+
+        let turn_number = game.current_turn;
+        let state_snapshot = game.clone();
+        let db = data.db.clone();
+        drop(games);
+
+        actix_web::rt::spawn(async move {
+            save_snapshot(&db, game_id, turn_number, &state_snapshot).await;
+        });
     }
 
     broadcast_turn_result(game_id, &result, &data.sessions);
@@ -359,18 +392,28 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for GameSession {
                         }
                     }
                     WsMessage::AdvanceTurn => {
-                        let mut games = self.state.games.lock().unwrap();
-                        let game = match games.get_mut(&self.game_id) {
-                            Some(g) if g.status == GameStatus::Running => g,
-                            _ => return,
-                        };
-                        let result = process_turn(game);
-                        check_player_elimination(game);
-                        if let Some(_vr) = check_victory(game) {
-                            game.status = GameStatus::Finished;
+                        let result;
+                        let game_id = self.game_id;
+                        let db = self.state.db.clone();
+                        {
+                            let mut games = self.state.games.lock().unwrap();
+                            let game = match games.get_mut(&game_id) {
+                                Some(g) if g.status == GameStatus::Running => g,
+                                _ => return,
+                            };
+                            result = process_turn(game);
+                            check_player_elimination(game);
+                            if let Some(_vr) = check_victory(game) {
+                                game.status = GameStatus::Finished;
+                            }
+                            let turn_number = game.current_turn;
+                            let state_snapshot = game.clone();
+                            drop(games);
+                            actix_web::rt::spawn(async move {
+                                save_snapshot(&db, game_id, turn_number, &state_snapshot).await;
+                            });
                         }
-                        drop(games);
-                        broadcast_turn_result(self.game_id, &result, &self.state.sessions);
+                        broadcast_turn_result(game_id, &result, &self.state.sessions);
                     }
                 }
             }
@@ -434,4 +477,81 @@ pub async fn game_ws(
     };
 
     ws::start(session, &req, stream)
+}
+
+pub async fn list_games(data: web::Data<AppState>) -> HttpResponse {
+    let games = data.games.lock().unwrap();
+    let mut game_list: Vec<serde_json::Value> = Vec::new();
+
+    for game in games.values() {
+        let player_names: Vec<String> = game
+            .players
+            .values()
+            .map(|p| p.name.clone())
+            .collect();
+
+        game_list.push(serde_json::json!({
+            "id": game.id,
+            "name": game.name,
+            "status": format!("{:?}", game.status),
+            "current_turn": game.current_turn,
+            "max_turns": game.max_turns,
+            "max_players": game.max_players,
+            "player_count": game.players.len(),
+            "player_names": player_names,
+        }));
+    }
+
+    HttpResponse::Ok().json(game_list)
+}
+
+pub async fn get_replay(
+    data: web::Data<AppState>,
+    path: web::Path<Uuid>,
+) -> HttpResponse {
+    let game_id = path.into_inner();
+
+    let rows = match sqlx::query_as::<_, (i32, Value)>(
+        "SELECT turn_number, state_json FROM game_snapshots WHERE game_id = $1 ORDER BY turn_number ASC"
+    )
+    .bind(game_id)
+    .fetch_all(&data.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            log::warn!("Failed to fetch replay snapshots: {}", e);
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "error": "Failed to fetch replay data" }));
+        }
+    };
+
+    if rows.is_empty() {
+        let games = data.games.lock().unwrap();
+        if let Some(game) = games.get(&game_id) {
+            if game.current_turn == 0 {
+                return HttpResponse::Ok().json(serde_json::json!({
+                    "game_id": game_id,
+                    "snapshots": []
+                }));
+            }
+        }
+        return HttpResponse::NotFound()
+            .json(serde_json::json!({ "error": "No snapshots found for this game" }));
+    }
+
+    let snapshots: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|(turn_number, state_json)| {
+            serde_json::json!({
+                "turn_number": turn_number,
+                "state": state_json,
+            })
+        })
+        .collect();
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "game_id": game_id,
+        "snapshots": snapshots,
+    }))
 }

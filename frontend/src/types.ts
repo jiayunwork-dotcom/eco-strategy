@@ -169,3 +169,24 @@ export const ACTION_COSTS: Record<PlayerActionType, number> = {
   SpeciesProtection: 3,
   BioInvasion: 10,
 };
+
+export interface GameSnapshot {
+  turn_number: number;
+  state: GameState;
+}
+
+export interface ReplayData {
+  game_id: string;
+  snapshots: GameSnapshot[];
+}
+
+export interface GameListItem {
+  id: string;
+  name: string;
+  status: string;
+  current_turn: number;
+  max_turns: number;
+  max_players: number;
+  player_count: number;
+  player_names: string[];
+}

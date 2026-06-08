@@ -40,6 +40,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(app_state.clone())
             .route("/api/games", web::post().to(handlers::create_game))
+            .route("/api/games", web::get().to(handlers::list_games))
             .route("/api/games/{game_id}/join", web::post().to(handlers::join_game))
             .route("/api/games/{game_id}", web::get().to(handlers::get_game_state))
             .route(
@@ -49,6 +50,10 @@ async fn main() -> std::io::Result<()> {
             .route(
                 "/api/games/{game_id}/turn",
                 web::post().to(handlers::advance_turn),
+            )
+            .route(
+                "/api/games/{game_id}/replay",
+                web::get().to(handlers::get_replay),
             )
             .route("/ws/{game_id}", web::get().to(handlers::game_ws))
     })

@@ -1,4 +1,4 @@
-import { GameState, PlayerAction, TurnResult } from './types';
+import { GameState, PlayerAction, TurnResult, ReplayData, GameListItem } from './types';
 
 const API_BASE = '';
 
@@ -9,6 +9,12 @@ export async function createGame(name: string, maxPlayers: number): Promise<{ ga
     body: JSON.stringify({ name, max_players: maxPlayers }),
   });
   if (!res.ok) throw new Error((await res.json()).error || 'Failed to create game');
+  return res.json();
+}
+
+export async function listGames(): Promise<GameListItem[]> {
+  const res = await fetch(`${API_BASE}/api/games`);
+  if (!res.ok) throw new Error('Failed to list games');
   return res.json();
 }
 
@@ -25,6 +31,12 @@ export async function joinGame(gameId: string, playerName: string): Promise<{ pl
 export async function getGameState(gameId: string): Promise<GameState> {
   const res = await fetch(`${API_BASE}/api/games/${gameId}`);
   if (!res.ok) throw new Error('Failed to fetch game state');
+  return res.json();
+}
+
+export async function getReplay(gameId: string): Promise<ReplayData> {
+  const res = await fetch(`${API_BASE}/api/games/${gameId}/replay`);
+  if (!res.ok) throw new Error('Failed to fetch replay data');
   return res.json();
 }
 

@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameState, TurnResult, PopulationHistoryEntry } from './types';
-import { getGameState, WebSocketManager } from './api';
+import { GameState, TurnResult, PopulationHistoryEntry, ReplayData } from './types';
+import { getGameState, getReplay, WebSocketManager } from './api';
 import Lobby from './components/Lobby';
 import GameView from './components/GameView';
+import Replay from './components/Replay';
+
+type ViewMode = 'lobby' | 'game' | 'replay';
 
 const styles: Record<string, React.CSSProperties> = {
   app: {
@@ -17,12 +20,15 @@ const styles: Record<string, React.CSSProperties> = {
 };
 
 export default function App() {
+  const [viewMode, setViewMode] = useState<ViewMode>('lobby');
   const [gameId, setGameId] = useState<string | null>(null);
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [turnResult, setTurnResult] = useState<TurnResult | null>(null);
   const [populationHistory, setPopulationHistory] = useState<Record<string, PopulationHistoryEntry[]>>({});
   const [error, setError] = useState<string | null>(null);
+  const [replayData, setReplayData] = useState<ReplayData | null>(null);
+  const [replayLoading, setReplayLoading] = useState(false);
   const wsRef = useRef<WebSocketManager | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -38,16 +44,16 @@ export default function App() {
   }, [gameId]);
 
   useEffect(() => {
-    if (!gameId) return;
+    if (viewMode !== 'game' || !gameId) return;
     fetchState();
     pollRef.current = setInterval(fetchState, 5000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [gameId, fetchState]);
+  }, [gameId, viewMode, fetchState]);
 
   useEffect(() => {
-    if (!gameId) return;
+    if (viewMode !== 'game' || !gameId) return;
     const ws = new WebSocketManager(gameId, (data) => {
       if (data.turn !== undefined) {
         setTurnResult(data);
@@ -64,7 +70,7 @@ export default function App() {
       ws.disconnect();
       wsRef.current = null;
     };
-  }, [gameId, playerId, fetchState]);
+  }, [gameId, playerId, viewMode, fetchState]);
 
   const updatePopulationHistory = useCallback((result: TurnResult) => {
     setPopulationHistory(prev => {
@@ -81,36 +87,92 @@ export default function App() {
   const handleGameCreated = (gid: string, pid: string) => {
     setGameId(gid);
     setPlayerId(pid);
+    setViewMode('game');
   };
 
   const handleGameJoined = (gid: string, pid: string) => {
     setGameId(gid);
     setPlayerId(pid);
+    setViewMode('game');
   };
 
   const handleDismissResult = () => {
     setTurnResult(null);
   };
 
-  if (!gameId || !playerId || !gameState) {
+  const handleWatchReplay = async (gid: string) => {
+    setReplayLoading(true);
+    setError(null);
+    try {
+      const data = await getReplay(gid);
+      setReplayData(data);
+      setGameId(gid);
+      setViewMode('replay');
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setReplayLoading(false);
+    }
+  };
+
+  const handleBackFromReplay = () => {
+    setReplayData(null);
+    setGameId(null);
+    setPlayerId(null);
+    setGameState(null);
+    setViewMode('lobby');
+  };
+
+  if (viewMode === 'replay' && replayData) {
     return (
       <div style={styles.app}>
-        <Lobby onGameCreated={handleGameCreated} onGameJoined={handleGameJoined} error={error} />
+        <Replay replayData={replayData} onBack={handleBackFromReplay} />
+      </div>
+    );
+  }
+
+  if (viewMode === 'game' && gameId && playerId && gameState) {
+    return (
+      <div style={styles.app}>
+        <GameView
+          gameState={gameState}
+          playerId={playerId}
+          turnResult={turnResult}
+          populationHistory={populationHistory}
+          onDismissResult={handleDismissResult}
+          wsRef={wsRef}
+          onRefresh={fetchState}
+        />
       </div>
     );
   }
 
   return (
     <div style={styles.app}>
-      <GameView
-        gameState={gameState}
-        playerId={playerId}
-        turnResult={turnResult}
-        populationHistory={populationHistory}
-        onDismissResult={handleDismissResult}
-        wsRef={wsRef}
-        onRefresh={fetchState}
+      <Lobby
+        onGameCreated={handleGameCreated}
+        onGameJoined={handleGameJoined}
+        onWatchReplay={handleWatchReplay}
+        error={error}
       />
+      {replayLoading && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(10, 22, 40, 0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div style={{ color: '#2ecc71', fontSize: '16px', fontWeight: 600 }}>
+            Loading replay data...
+          </div>
+        </div>
+      )}
     </div>
   );
 }

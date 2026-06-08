@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameState, TurnResult, PopulationHistoryEntry, ReplayData } from './types';
+import { GameState, TurnResult, PopulationHistoryEntry, ReplayData, MutationHistoryEntry } from './types';
 import { getGameState, getReplay, WebSocketManager } from './api';
 import Lobby from './components/Lobby';
 import GameView from './components/GameView';
@@ -26,6 +26,7 @@ export default function App() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [turnResult, setTurnResult] = useState<TurnResult | null>(null);
   const [populationHistory, setPopulationHistory] = useState<Record<string, PopulationHistoryEntry[]>>({});
+  const [mutationHistory, setMutationHistory] = useState<MutationHistoryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [replayData, setReplayData] = useState<ReplayData | null>(null);
   const [replayLoading, setReplayLoading] = useState(false);
@@ -82,6 +83,19 @@ export default function App() {
       }
       return next;
     });
+    if (result.mutation_events && result.mutation_events.length > 0) {
+      setMutationHistory(prev => [
+        ...prev,
+        ...result.mutation_events.map(evt => ({
+          turn: result.turn,
+          parent_species_id: evt.parent_species_id,
+          child_species_id: evt.child_species_id,
+          child_name: evt.child_name,
+          mutated_genes: evt.mutated_genes,
+          is_artificial: evt.is_artificial,
+        })),
+      ]);
+    }
   }, []);
 
   const handleGameCreated = (gid: string, pid: string) => {
@@ -120,6 +134,7 @@ export default function App() {
     setGameId(null);
     setPlayerId(null);
     setGameState(null);
+    setMutationHistory([]);
     setViewMode('lobby');
   };
 
@@ -139,6 +154,7 @@ export default function App() {
           playerId={playerId}
           turnResult={turnResult}
           populationHistory={populationHistory}
+          mutationHistory={mutationHistory}
           onDismissResult={handleDismissResult}
           wsRef={wsRef}
           onRefresh={fetchState}

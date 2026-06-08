@@ -704,6 +704,65 @@ pub fn try_mutations(
     mutations
 }
 
+pub fn apply_genetic_drift(
+    cell: &mut HexCell,
+    species_catalog: &mut Vec<Species>,
+) -> Vec<DriftEvent> {
+    let mut drift_events = Vec::new();
+    let mut rng = rand::thread_rng();
+
+    let pop_data: Vec<(Uuid, f64)> = cell
+        .populations
+        .iter()
+        .map(|p| (p.species_id, p.count))
+        .collect();
+
+    for (species_id, count) in &pop_data {
+        if *count >= 20.0 {
+            continue;
+        }
+
+        let species_idx = match species_catalog.iter().position(|s| s.id == *species_id) {
+            Some(idx) => idx,
+            None => continue,
+        };
+
+        let species_name = species_catalog[species_idx].name.clone();
+        let (prob, stddev) = if *count < 10.0 {
+            (0.15, 0.1)
+        } else {
+            (0.05, 0.05)
+        };
+
+        let mut drifted_positions: Vec<usize> = Vec::new();
+
+        for pos in 0..GENE_COUNT {
+            if rng.gen::<f64>() < prob {
+                let noise = gaussian_noise(&mut rng, stddev);
+                let old_val = species_catalog[species_idx].genes[pos];
+                let new_val = (old_val + noise).clamp(-2.0, 2.0);
+                if (old_val - new_val).abs() > 1e-10 {
+                    species_catalog[species_idx].genes[pos] = new_val;
+                    drifted_positions.push(pos);
+                }
+            }
+        }
+
+        if !drifted_positions.is_empty() {
+            species_catalog[species_idx].derive_attributes_from_genes();
+            drift_events.push(DriftEvent {
+                cell: (cell.q, cell.r),
+                species_id: *species_id,
+                species_name,
+                drifted_genes: drifted_positions,
+                population_count: *count,
+            });
+        }
+    }
+
+    drift_events
+}
+
 pub fn perform_directed_breeding(
     cell: &mut HexCell,
     species_catalog: &mut Vec<Species>,

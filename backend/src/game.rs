@@ -188,6 +188,7 @@ pub fn process_turn(game: &mut GameState) -> TurnResult {
     let mut climate_events = Vec::new();
     let mut territory_changes = Vec::new();
     let mut mutation_events = Vec::new();
+    let mut drift_events = Vec::new();
 
     let cell_keys: Vec<(i32, i32)> = game.cells.keys().cloned().collect();
 
@@ -261,6 +262,13 @@ pub fn process_turn(game: &mut GameState) -> TurnResult {
                 &mut game.species_tree,
             );
             mutation_events.extend(mutations);
+        }
+    }
+
+    for key in &cell_keys {
+        if let Some(cell) = game.cells.get_mut(key) {
+            let drifts = engine::apply_genetic_drift(cell, &mut game.species_catalog);
+            drift_events.extend(drifts);
         }
     }
 
@@ -390,6 +398,7 @@ pub fn process_turn(game: &mut GameState) -> TurnResult {
         climate_events,
         territory_changes,
         mutation_events,
+        drift_events,
     }
 }
 

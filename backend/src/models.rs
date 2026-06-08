@@ -345,6 +345,15 @@ pub struct MutationEvent {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DriftEvent {
+    pub cell: (i32, i32),
+    pub species_id: Uuid,
+    pub species_name: String,
+    pub drifted_genes: Vec<usize>,
+    pub population_count: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TurnResult {
     pub turn: u32,
     pub population_changes: Vec<PopulationChange>,
@@ -353,6 +362,8 @@ pub struct TurnResult {
     pub territory_changes: Vec<TerritoryChange>,
     #[serde(default)]
     pub mutation_events: Vec<MutationEvent>,
+    #[serde(default)]
+    pub drift_events: Vec<DriftEvent>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -1,8 +1,9 @@
-import React, { useMemo } from 'react';
-import { Species, GameState, TROPHIC_COLORS, TrophicLevel } from '../types';
+import React, { useMemo, useRef, useState } from 'react';
+import { Species, GameState, TROPHIC_COLORS, TrophicLevel, GENE_NAMES, MutationHistoryEntry } from '../types';
 
 interface EvolutionPanelProps {
   gameState: GameState;
+  mutationHistory: MutationHistoryEntry[];
 }
 
 interface TreeNode {
@@ -63,17 +64,81 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '13px',
     textAlign: 'center' as const,
   },
+  detailCard: {
+    position: 'absolute' as const,
+    background: 'rgba(10, 22, 40, 0.97)',
+    border: '1px solid #2ecc71',
+    borderRadius: '8px',
+    padding: '12px',
+    fontSize: '11px',
+    color: '#e0e6ed',
+    zIndex: 200,
+    minWidth: '260px',
+    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+    pointerEvents: 'none' as const,
+  },
+  detailTitle: {
+    fontWeight: 700,
+    fontSize: '13px',
+    marginBottom: '8px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  geneRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginBottom: '3px',
+  },
+  geneLabel: {
+    width: '90px',
+    fontSize: '9px',
+    color: '#8899aa',
+    textAlign: 'right' as const,
+    flexShrink: 0,
+  },
+  geneBarBg: {
+    width: '120px',
+    height: '8px',
+    background: '#0a1628',
+    borderRadius: '4px',
+    overflow: 'hidden',
+    position: 'relative' as const,
+  },
+  geneBarFill: {
+    height: '100%',
+    borderRadius: '4px',
+    transition: 'width 0.2s',
+  },
+  geneValue: {
+    fontSize: '9px',
+    color: '#5a7a9a',
+    width: '32px',
+    textAlign: 'left' as const,
+  },
+  timelineContainer: {
+    marginTop: '8px',
+    paddingTop: '8px',
+    borderTop: '1px solid #1a3a5c',
+  },
+  timelineTitle: {
+    fontSize: '10px',
+    fontWeight: 600,
+    color: '#8899aa',
+    marginBottom: '4px',
+  },
   tooltip: {
     position: 'absolute' as const,
-    background: 'rgba(10, 22, 40, 0.95)',
+    background: 'rgba(10, 22, 40, 0.97)',
     border: '1px solid #1a3a5c',
     borderRadius: '6px',
     padding: '8px 12px',
     fontSize: '11px',
     color: '#e0e6ed',
     pointerEvents: 'none' as const,
-    zIndex: 100,
-    maxWidth: '200px',
+    zIndex: 300,
+    maxWidth: '250px',
   },
 };
 
@@ -179,8 +244,28 @@ function layoutTree(
   return positions;
 }
 
-export default function EvolutionPanel({ gameState }: EvolutionPanelProps) {
-  const [hoveredId, setHoveredId] = React.useState<string | null>(null);
+function getAncestorPath(speciesId: string, speciesTree: Record<string, string | null>): string[] {
+  const path: string[] = [speciesId];
+  let current = speciesId;
+  while (speciesTree[current] !== null && speciesTree[current] !== undefined) {
+    const parent = speciesTree[current]!;
+    path.unshift(parent);
+    current = parent;
+  }
+  return path;
+}
+
+function getGeneBarColor(value: number): string {
+  if (value > 0.5) return '#2ecc71';
+  if (value > 0) return '#f39c12';
+  if (value > -0.5) return '#e67e22';
+  return '#e74c3c';
+}
+
+export default function EvolutionPanel({ gameState, mutationHistory }: EvolutionPanelProps) {
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [timelineHover, setTimelineHover] = useState<{ turn: number; idx: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const treeNodes = useMemo(() => buildTree(gameState), [gameState]);
 
@@ -204,6 +289,31 @@ export default function EvolutionPanel({ gameState }: EvolutionPanelProps) {
     return result;
   }, [treeNodes]);
 
+  const ancestorPath = useMemo(() => {
+    if (!selectedId) return new Set<string>();
+    return new Set(getAncestorPath(selectedId, gameState.species_tree));
+  }, [selectedId, gameState.species_tree]);
+
+  const ancestorEdges = useMemo(() => {
+    if (!selectedId) return new Set<string>();
+    const path = getAncestorPath(selectedId, gameState.species_tree);
+    const edges = new Set<string>();
+    for (let i = 0; i < path.length - 1; i++) {
+      edges.add(`${path[i]}->${path[i + 1]}`);
+    }
+    return edges;
+  }, [selectedId, gameState.species_tree]);
+
+  const selectedSpecies = useMemo(() => {
+    if (!selectedId) return null;
+    return gameState.species_catalog.find(s => s.id === selectedId) || null;
+  }, [selectedId, gameState.species_catalog]);
+
+  const selectedNode = useMemo(() => {
+    if (!selectedId) return null;
+    return allNodes.find(n => n.species.id === selectedId) || null;
+  }, [selectedId, allNodes]);
+
   if (treeNodes.length === 0) {
     return (
       <div style={styles.panel}>
@@ -213,12 +323,37 @@ export default function EvolutionPanel({ gameState }: EvolutionPanelProps) {
     );
   }
 
+  const detailCardPos = (() => {
+    if (!selectedId) return null;
+    const pos = positions.get(selectedId);
+    if (!pos) return null;
+    const svgEl = containerRef.current?.querySelector('svg');
+    if (!svgEl) return null;
+    const rect = svgEl.getBoundingClientRect();
+    const panelRect = containerRef.current.getBoundingClientRect();
+    const x = pos.x + rect.left - panelRect.left + 20;
+    const y = pos.y + rect.top - panelRect.top - 40;
+    return {
+      left: Math.min(x, panelRect.width - 280),
+      top: Math.max(0, y),
+    };
+  })();
+
   return (
-    <div style={styles.panel}>
+    <div style={styles.panel} ref={containerRef}>
       <div style={styles.header}>Evolution Tree</div>
 
       <div style={styles.svgContainer}>
-        <svg width={svgWidth} height={svgHeight} style={{ display: 'block' }}>
+        <svg
+          width={svgWidth}
+          height={svgHeight}
+          style={{ display: 'block' }}
+          onClick={(e) => {
+            const target = e.target as SVGElement;
+            if (target.tagName === 'circle') return;
+            setSelectedId(null);
+          }}
+        >
           {allNodes.map(node => {
             const pos = positions.get(node.species.id);
             if (!pos) return null;
@@ -228,6 +363,11 @@ export default function EvolutionPanel({ gameState }: EvolutionPanelProps) {
 
             const trophicColor = TROPHIC_COLORS[node.species.trophic_level];
             const nodeRadius = Math.max(4, Math.min(16, Math.sqrt(node.totalPopulation / 50)));
+            const isSelected = selectedId === node.species.id;
+            const isInPath = ancestorPath.has(node.species.id);
+
+            const edgeKey = parentId ? `${parentId}->${node.species.id}` : null;
+            const isHighlightedEdge = edgeKey ? ancestorEdges.has(edgeKey) : false;
 
             return (
               <g key={node.species.id}>
@@ -235,22 +375,24 @@ export default function EvolutionPanel({ gameState }: EvolutionPanelProps) {
                   <path
                     d={`M ${parentPos.x} ${parentPos.y} C ${parentPos.x} ${(parentPos.y + pos.y) / 2}, ${pos.x} ${(parentPos.y + pos.y) / 2}, ${pos.x} ${pos.y}`}
                     fill="none"
-                    stroke={node.isExtinct ? '#5a7a9a' : trophicColor}
-                    strokeWidth={1.5}
-                    strokeOpacity={node.isExtinct ? 0.4 : 0.6}
+                    stroke={isHighlightedEdge ? '#ffd700' : (node.isExtinct ? '#5a7a9a' : trophicColor)}
+                    strokeWidth={isHighlightedEdge ? 3 : 1.5}
+                    strokeOpacity={isHighlightedEdge ? 1 : (node.isExtinct ? 0.4 : 0.6)}
                   />
                 )}
                 <circle
                   cx={pos.x}
                   cy={pos.y}
-                  r={nodeRadius}
-                  fill={node.isExtinct ? 'none' : trophicColor}
-                  stroke={node.isExtinct ? '#5a7a9a' : trophicColor}
-                  strokeWidth={1.5}
+                  r={isSelected ? nodeRadius + 3 : nodeRadius}
+                  fill={node.isExtinct ? 'none' : (isSelected ? '#ffd700' : trophicColor)}
+                  stroke={isSelected ? '#ffd700' : (node.isExtinct ? '#5a7a9a' : (isInPath ? '#ffd700' : trophicColor))}
+                  strokeWidth={isSelected || isInPath ? 2.5 : 1.5}
                   strokeDasharray={node.isExtinct ? '3,3' : 'none'}
-                  fillOpacity={node.isExtinct ? 0 : 0.8}
-                  onMouseEnter={() => setHoveredId(node.species.id)}
-                  onMouseLeave={() => setHoveredId(null)}
+                  fillOpacity={node.isExtinct ? 0 : (isSelected ? 0.3 : 0.8)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedId(selectedId === node.species.id ? null : node.species.id);
+                  }}
                   style={{ cursor: 'pointer' }}
                 />
                 {node.species.is_artificial && (
@@ -268,7 +410,7 @@ export default function EvolutionPanel({ gameState }: EvolutionPanelProps) {
                     x={pos.x}
                     y={pos.y + nodeRadius + 10}
                     fontSize="8"
-                    fill="#8899aa"
+                    fill={isInPath ? '#ffd700' : '#8899aa'}
                     textAnchor="middle"
                   >
                     {node.species.name.length > 12
@@ -282,26 +424,104 @@ export default function EvolutionPanel({ gameState }: EvolutionPanelProps) {
         </svg>
       </div>
 
-      {hoveredId && (() => {
-        const species = gameState.species_catalog.find(s => s.id === hoveredId);
-        if (!species) return null;
-        const node = allNodes.find(n => n.species.id === hoveredId);
-        if (!node) return null;
-        return (
-          <div style={styles.tooltip}>
-            <div style={{ fontWeight: 600, color: TROPHIC_COLORS[species.trophic_level] }}>
-              {species.name}
+      {selectedId && selectedSpecies && selectedNode && detailCardPos && (
+        <div style={{ ...styles.detailCard, left: detailCardPos.left, top: detailCardPos.top }}>
+          <div style={{ ...styles.detailTitle, color: TROPHIC_COLORS[selectedSpecies.trophic_level] }}>
+            {selectedSpecies.name}
+            {selectedSpecies.is_artificial && <span style={{ color: '#f39c12' }}>&#x2692;</span>}
+          </div>
+          <div style={{ fontSize: '10px', color: '#8899aa', marginBottom: '8px' }}>
+            Pop: {Math.round(selectedNode.totalPopulation)} · {selectedSpecies.trophic_level}
+            {selectedNode.isExtinct && <span style={{ color: '#e74c3c', marginLeft: '6px' }}>Extinct</span>}
+          </div>
+          {selectedSpecies.genes.map((geneValue: number, i: number) => {
+            const normalized = (geneValue + 2) / 4;
+            const barWidth = Math.max(2, normalized * 120);
+            return (
+              <div key={i} style={styles.geneRow}>
+                <span style={styles.geneLabel}>{GENE_NAMES[i]}</span>
+                <div style={styles.geneBarBg}>
+                  <div style={{
+                    ...styles.geneBarFill,
+                    width: barWidth,
+                    background: getGeneBarColor(geneValue),
+                  }} />
+                </div>
+                <span style={styles.geneValue}>{geneValue.toFixed(2)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {mutationHistory.length > 0 && (
+        <div style={styles.timelineContainer}>
+          <div style={styles.timelineTitle}>Mutation Timeline</div>
+          <div style={{ position: 'relative', height: '36px', overflow: 'hidden' }}>
+            <svg
+              width="100%"
+              height="36"
+              viewBox={`0 0 ${Math.max(300, mutationHistory[mutationHistory.length - 1].turn * 12 + 20)} 36`}
+              preserveAspectRatio="xMinYMin meet"
+              style={{ display: 'block' }}
+            >
+              <line
+                x1={0} y1={18}
+                x2={Math.max(300, mutationHistory[mutationHistory.length - 1].turn * 12 + 20)}
+                y2={18}
+                stroke="#1a3a5c"
+                strokeWidth={1}
+              />
+              {mutationHistory.map((entry, idx) => {
+                const cx = entry.turn * 12 + 10;
+                const isHovered = timelineHover?.turn === entry.turn && timelineHover?.idx === idx;
+                return (
+                  <circle
+                    key={idx}
+                    cx={cx}
+                    cy={18}
+                    r={isHovered ? 5 : 3}
+                    fill={entry.is_artificial ? '#f39c12' : '#3498db'}
+                    stroke={isHovered ? '#fff' : 'none'}
+                    strokeWidth={1}
+                    style={{ cursor: 'pointer' }}
+                    onMouseEnter={() => setTimelineHover({ turn: entry.turn, idx })}
+                    onMouseLeave={() => setTimelineHover(null)}
+                  />
+                );
+              })}
+            </svg>
+          </div>
+          {timelineHover && (() => {
+            const entry = mutationHistory[timelineHover.idx];
+            if (!entry) return null;
+            const parentName = gameState.species_catalog.find(s => s.id === entry.parent_species_id)?.name || entry.parent_species_id.slice(0, 8);
+            const geneNames = entry.mutated_genes.map(g => GENE_NAMES[g] || `Gene${g}`).join(', ');
+            return (
+              <div style={styles.tooltip}>
+                <div style={{ fontWeight: 600, marginBottom: '4px' }}>
+                  Turn {entry.turn} · {entry.is_artificial ? '⚒ Artificial' : '🧬 Natural'}
+                </div>
+                <div style={{ fontSize: '10px', color: '#8899aa' }}>
+                  <div>Parent: {parentName}</div>
+                  <div>Child: {entry.child_name}</div>
+                  <div>Genes: {geneNames}</div>
+                </div>
+              </div>
+            );
+          })()}
+          <div style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
+            <div style={styles.legendItem}>
+              <span style={{ ...styles.legendDot, background: '#3498db' }} />
+              Natural
             </div>
-            <div>Population: {Math.round(node.totalPopulation)}</div>
-            <div>Trophic: {species.trophic_level}</div>
-            {species.is_artificial && <div style={{ color: '#f39c12' }}>&#x2692; Artificially Bred</div>}
-            {node.isExtinct && <div style={{ color: '#e74c3c' }}>Extinct</div>}
-            <div style={{ marginTop: '4px', fontSize: '10px', color: '#8899aa' }}>
-              Genes: {species.genes.slice(0, 4).map((g, i) => `${g.toFixed(2)}`).join(', ')}...
+            <div style={styles.legendItem}>
+              <span style={{ ...styles.legendDot, background: '#f39c12' }} />
+              Artificial
             </div>
           </div>
-        );
-      })()}
+        </div>
+      )}
 
       <div style={styles.legend}>
         {(['Producer', 'PrimaryConsumer', 'SecondaryConsumer', 'Decomposer'] as TrophicLevel[]).map(level => (
@@ -317,6 +537,10 @@ export default function EvolutionPanel({ gameState }: EvolutionPanelProps) {
         <div style={styles.legendItem}>
           <span style={{ color: '#f39c12', fontSize: '12px' }}>&#x2692;</span>
           Bred
+        </div>
+        <div style={styles.legendItem}>
+          <span style={{ ...styles.legendDot, background: '#ffd700' }} />
+          Selected Path
         </div>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { TurnResult, Player, TROPHIC_COLORS, CLIMATE_ICONS, GENE_NAMES } from '../types';
+import { TurnResult, Player, TROPHIC_COLORS, CLIMATE_ICONS, GENE_NAMES, DriftEvent } from '../types';
 
 interface TurnResultModalProps {
   result: TurnResult;
@@ -242,6 +242,29 @@ export default function TurnResultModal({ result, onDismiss, players }: TurnResu
                 </span>
                 <span style={{ fontSize: '10px', color: '#5a7a9a' }}>
                   Cell ({evt.cell[0]},{evt.cell[1]})
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {result.drift_events && result.drift_events.length > 0 && (
+          <div style={styles.section}>
+            <div style={styles.sectionTitle}>🔬 Genetic Drift</div>
+            {result.drift_events.map((evt: DriftEvent, i: number) => (
+              <div key={i} style={{
+                ...styles.item,
+                background: 'rgba(52, 152, 219, 0.1)',
+                borderLeft: '3px solid #3498db',
+              }}>
+                <span>
+                  🔬 {evt.species_name}
+                  <span style={{ fontSize: '10px', color: '#5a7a9a', marginLeft: '6px' }}>
+                    ({evt.drifted_genes.map(g => GENE_NAMES[g]).join(', ')})
+                  </span>
+                </span>
+                <span style={{ fontSize: '10px', color: '#5a7a9a' }}>
+                  Cell ({evt.cell[0]},{evt.cell[1]}) · Pop {Math.round(evt.population_count)}
                 </span>
               </div>
             ))}

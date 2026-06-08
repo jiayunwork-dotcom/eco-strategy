@@ -1,5 +1,5 @@
 import React, { useState, useRef, MutableRefObject } from 'react';
-import { GameState, TurnResult, PopulationHistoryEntry, HexCell } from '../types';
+import { GameState, TurnResult, PopulationHistoryEntry, HexCell, MutationHistoryEntry } from '../types';
 import { WebSocketManager } from '../api';
 import PlayerBar from './PlayerBar';
 import HexMap from './HexMap';
@@ -15,6 +15,7 @@ interface GameViewProps {
   playerId: string;
   turnResult: TurnResult | null;
   populationHistory: Record<string, PopulationHistoryEntry[]>;
+  mutationHistory: MutationHistoryEntry[];
   onDismissResult: () => void;
   wsRef: MutableRefObject<WebSocketManager | null>;
   onRefresh: () => void;
@@ -128,6 +129,7 @@ export default function GameView({
   playerId,
   turnResult,
   populationHistory,
+  mutationHistory,
   onDismissResult,
   wsRef,
   onRefresh,
@@ -217,7 +219,7 @@ export default function GameView({
               )}
             </>
           ) : (
-            <EvolutionPanel gameState={gameState} />
+            <EvolutionPanel gameState={gameState} mutationHistory={mutationHistory} />
           )}
         </div>
       </div>

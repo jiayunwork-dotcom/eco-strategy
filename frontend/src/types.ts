@@ -149,6 +149,14 @@ export interface MutationEvent {
   is_artificial: boolean;
 }
 
+export interface DriftEvent {
+  cell: [number, number];
+  species_id: string;
+  species_name: string;
+  drifted_genes: number[];
+  population_count: number;
+}
+
 export interface TurnResult {
   turn: number;
   population_changes: PopulationChange[];
@@ -156,11 +164,21 @@ export interface TurnResult {
   climate_events: ClimateEvent[];
   territory_changes: TerritoryChange[];
   mutation_events: MutationEvent[];
+  drift_events: DriftEvent[];
 }
 
 export interface PopulationHistoryEntry {
   turn: number;
   count: number;
+}
+
+export interface MutationHistoryEntry {
+  turn: number;
+  parent_species_id: string;
+  child_species_id: string;
+  child_name: string;
+  mutated_genes: number[];
+  is_artificial: boolean;
 }
 
 export const BIOME_COLORS: Record<Biome, string> = {

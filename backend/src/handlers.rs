@@ -14,7 +14,7 @@ use crate::game::{
 };
 use crate::models::{
     GameStatus, GameState, Player, PlayerAction, PlayerActionType, Population, TrophicLevel,
-    TurnResult, ClimateState, MutationEvent,
+    TurnResult, ClimateState, MutationEvent, DriftEvent,
 };
 
 pub struct AppState {

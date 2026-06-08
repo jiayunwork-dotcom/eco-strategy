@@ -652,11 +652,20 @@ pub fn try_mutations(
 
         child_species.derive_attributes_from_genes();
 
-        for ((pred_id, prey_id), entry) in predation_matrix.iter() {
-            if pred_id == species_id || prey_id == species_id {
-                predation_matrix.insert((child_id, *prey_id), entry.clone());
-                predation_matrix.insert((*pred_id, child_id), entry.clone());
-            }
+        let new_predation_entries: Vec<((Uuid, Uuid), PredationEntry)> = predation_matrix
+            .iter()
+            .filter(|((pred_id, prey_id), _)| pred_id == species_id || prey_id == species_id)
+            .map(|((pred_id, prey_id), entry)| {
+                let mut entries = Vec::new();
+                entries.push(((child_id, *prey_id), entry.clone()));
+                entries.push(((*pred_id, child_id), entry.clone()));
+                entries
+            })
+            .flatten()
+            .collect();
+
+        for (key, entry) in new_predation_entries {
+            predation_matrix.insert(key, entry);
         }
 
         species_catalog.push(child_species);
@@ -756,11 +765,20 @@ pub fn perform_directed_breeding(
 
     child_species.derive_attributes_from_genes();
 
-    for ((pred_id, prey_id), entry) in predation_matrix.iter() {
-        if pred_id == species_id || prey_id == species_id {
-            predation_matrix.insert((child_id, *prey_id), entry.clone());
-            predation_matrix.insert((*pred_id, child_id), entry.clone());
-        }
+    let new_predation_entries: Vec<((Uuid, Uuid), PredationEntry)> = predation_matrix
+        .iter()
+        .filter(|((pred_id, prey_id), _)| pred_id == species_id || prey_id == species_id)
+        .map(|((pred_id, prey_id), entry)| {
+            let mut entries = Vec::new();
+            entries.push(((child_id, *prey_id), entry.clone()));
+            entries.push(((*pred_id, child_id), entry.clone()));
+            entries
+        })
+        .flatten()
+        .collect();
+
+    for (key, entry) in new_predation_entries {
+        predation_matrix.insert(key, entry);
     }
 
     let all_mutated: Vec<usize> = enhance_genes

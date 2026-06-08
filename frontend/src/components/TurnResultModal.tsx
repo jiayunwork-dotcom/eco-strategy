@@ -1,5 +1,5 @@
 import React from 'react';
-import { TurnResult, Player, TROPHIC_COLORS, CLIMATE_ICONS } from '../types';
+import { TurnResult, Player, TROPHIC_COLORS, CLIMATE_ICONS, GENE_NAMES } from '../types';
 
 interface TurnResultModalProps {
   result: TurnResult;
@@ -219,6 +219,29 @@ export default function TurnResultModal({ result, onDismiss, players }: TurnResu
                 <span>→</span>
                 <span style={{ color: getPlayerColor(change.new_owner) }}>
                   {getPlayerName(change.new_owner)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {result.mutation_events && result.mutation_events.length > 0 && (
+          <div style={styles.section}>
+            <div style={styles.sectionTitle}>🧬 Mutations</div>
+            {result.mutation_events.map((evt, i) => (
+              <div key={i} style={{
+                ...styles.item,
+                background: evt.is_artificial ? 'rgba(243, 156, 18, 0.1)' : 'rgba(155, 89, 182, 0.1)',
+                borderLeft: `3px solid ${evt.is_artificial ? '#f39c12' : '#9b59b6'}`,
+              }}>
+                <span>
+                  {evt.is_artificial ? '⚒' : '🧬'} {evt.child_name}
+                  <span style={{ fontSize: '10px', color: '#5a7a9a', marginLeft: '6px' }}>
+                    ({GENE_NAMES[evt.mutated_genes[0]]}{evt.mutated_genes.length > 1 ? ` +${evt.mutated_genes.length - 1}` : ''})
+                  </span>
+                </span>
+                <span style={{ fontSize: '10px', color: '#5a7a9a' }}>
+                  Cell ({evt.cell[0]},{evt.cell[1]})
                 </span>
               </div>
             ))}

@@ -75,6 +75,7 @@ pub mod action_key {
                 "HuntingQuota" => PlayerActionType::HuntingQuota,
                 "SpeciesProtection" => PlayerActionType::SpeciesProtection,
                 "BioInvasion" => PlayerActionType::BioInvasion,
+                "DirectedBreeding" => PlayerActionType::DirectedBreeding,
                 _ => continue,
             };
             result.insert(key, v);
@@ -100,6 +101,27 @@ pub enum TrophicLevel {
     Decomposer,
 }
 
+pub const GENE_COUNT: usize = 12;
+
+pub const GENE_NAMES: [&str; GENE_COUNT] = [
+    "Fertility",
+    "ColdTolerance",
+    "HeatTolerance",
+    "DroughtTolerance",
+    "Competitiveness",
+    "Camouflage",
+    "Speed",
+    "BodySize",
+    "Toxicity",
+    "Symbiosis",
+    "Migration",
+    "DiseaseResistance",
+];
+
+pub const GENE_WEIGHTS: [f64; GENE_COUNT] = [
+    0.12, 0.08, 0.08, 0.08, 0.12, 0.06, 0.10, 0.10, 0.08, 0.06, 0.06, 0.06,
+];
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Species {
     pub id: Uuid,
@@ -111,6 +133,53 @@ pub struct Species {
     pub temp_range: (f64, f64),
     pub humidity_range: (f64, f64),
     pub max_population: u32,
+    #[serde(default = "default_genes")]
+    pub genes: Vec<f64>,
+    pub parent_species_id: Option<Uuid>,
+    #[serde(default)]
+    pub is_artificial: bool,
+}
+
+fn default_genes() -> Vec<f64> {
+    vec![0.5; GENE_COUNT]
+}
+
+impl Species {
+    pub fn derive_attributes_from_genes(&mut self) {
+        let expressed: Vec<f64> = self
+            .genes
+            .iter()
+            .enumerate()
+            .map(|(i, &g)| {
+                let sigmoid = 1.0 / (1.0 + (-g).exp());
+                sigmoid * GENE_WEIGHTS[i]
+            })
+            .collect();
+
+        self.base_reproduction_rate = 0.01 + expressed[0] * 0.30;
+        self.competitiveness = expressed[4] * 1.0;
+        let cold_tol = expressed[1] * 40.0;
+        let heat_tol = 10.0 + expressed[2] * 40.0;
+        self.temp_range = (-cold_tol, heat_tol);
+        let humid_min = (1.0 - expressed[3]) * 50.0;
+        let humid_max = 50.0 + expressed[3] * 50.0;
+        self.humidity_range = (humid_min, humid_max);
+        self.max_population = (100.0 + expressed[7] * 2000.0) as u32;
+    }
+
+    pub fn compute_environmental_fitness(&self, cell: &HexCell) -> f64 {
+        let temp_center = (self.temp_range.0 + self.temp_range.1) / 2.0;
+        let temp_width = (self.temp_range.1 - self.temp_range.0).max(1.0);
+        let temp_fitness = (-((cell.temperature - temp_center) / temp_width).powi(2)).exp();
+
+        let humid_center = (self.humidity_range.0 + self.humidity_range.1) / 2.0;
+        let humid_width = (self.humidity_range.1 - self.humidity_range.0).max(1.0);
+        let humid_fitness = (-((cell.humidity - humid_center) / humid_width).powi(2)).exp();
+
+        let alt_fitness = 1.0 - cell.altitude * 0.3;
+
+        (temp_fitness + humid_fitness + alt_fitness) / 3.0
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -196,6 +265,7 @@ pub enum PlayerActionType {
     HuntingQuota,
     SpeciesProtection,
     BioInvasion,
+    DirectedBreeding,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -238,6 +308,8 @@ pub struct GameState {
     pub max_turns: u32,
     pub max_players: u8,
     pub status: GameStatus,
+    #[serde(default)]
+    pub species_tree: HashMap<Uuid, Option<Uuid>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -263,12 +335,24 @@ pub struct TerritoryChange {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MutationEvent {
+    pub parent_species_id: Uuid,
+    pub child_species_id: Uuid,
+    pub child_name: String,
+    pub cell: (i32, i32),
+    pub mutated_genes: Vec<usize>,
+    pub is_artificial: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TurnResult {
     pub turn: u32,
     pub population_changes: Vec<PopulationChange>,
     pub collapse_events: Vec<CollapseEvent>,
     pub climate_events: Vec<ClimateEvent>,
     pub territory_changes: Vec<TerritoryChange>,
+    #[serde(default)]
+    pub mutation_events: Vec<MutationEvent>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -306,5 +390,11 @@ pub enum PlayerAction {
     BioInvasion {
         cell: (i32, i32),
         species_id: Uuid,
+    },
+    #[serde(rename = "directed_breeding")]
+    DirectedBreeding {
+        cell: (i32, i32),
+        species_id: Uuid,
+        enhance_genes: Vec<usize>,
     },
 }

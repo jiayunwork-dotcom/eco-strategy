@@ -1,6 +1,14 @@
 use crate::models::*;
+use rand::Rng;
 use std::collections::HashMap;
 use uuid::Uuid;
+
+fn gaussian_noise(rng: &mut impl Rng, stddev: f64) -> f64 {
+    let u1: f64 = rng.gen::<f64>().max(1e-10);
+    let u2: f64 = rng.gen::<f64>();
+    let z0 = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+    z0 * stddev
+}
 
 fn biome_carrying_capacity(biome: &Biome) -> f64 {
     match biome {
@@ -92,7 +100,8 @@ pub fn compute_cell_populations(
                 let comp = find_species(species_catalog, &p.species_id)
                     .map(|s| s.competitiveness)
                     .unwrap_or(0.5);
-                comp * p.count
+                let multiplier = compute_competition_multiplier(species, &p.species_id, species_catalog);
+                comp * multiplier * p.count
             })
             .sum();
         let competition = same_trophic_total / k;
@@ -511,4 +520,288 @@ pub fn check_neutral_territory(
     }
 
     None
+}
+
+pub fn gene_cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let mag_a: f64 = a.iter().map(|x| x * x).sum::<f64>().sqrt();
+    let mag_b: f64 = b.iter().map(|x| x * x).sum::<f64>().sqrt();
+    if mag_a < 1e-10 || mag_b < 1e-10 {
+        return 0.0;
+    }
+    (dot / (mag_a * mag_b)).clamp(-1.0, 1.0)
+}
+
+pub fn compute_competition_multiplier(
+    species: &Species,
+    other_species_id: &Uuid,
+    species_catalog: &[Species],
+) -> f64 {
+    let other = match find_species(species_catalog, other_species_id) {
+        Some(s) => s,
+        None => return 1.0,
+    };
+
+    if other.trophic_level != species.trophic_level {
+        return 1.0;
+    }
+
+    let similarity = gene_cosine_similarity(&species.genes, &other.genes);
+    if similarity > 0.8 {
+        2.0
+    } else {
+        1.0
+    }
+}
+
+pub fn apply_natural_selection(
+    cell: &mut HexCell,
+    species_catalog: &[Species],
+) -> Vec<PopulationChange> {
+    let mut changes = Vec::new();
+    let cell_clone = cell.clone();
+
+    for pop in &mut cell.populations {
+        let species = match find_species(species_catalog, &pop.species_id) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        let fitness = species.compute_environmental_fitness(&cell_clone);
+        if fitness < 0.3 {
+            let old_count = pop.count;
+            pop.count *= 0.85;
+            if (old_count - pop.count).abs() > 0.01 {
+                changes.push(PopulationChange {
+                    cell: (cell.q, cell.r),
+                    species_id: pop.species_id,
+                    old_count,
+                    new_count: pop.count,
+                });
+            }
+        }
+    }
+
+    changes
+}
+
+pub fn try_mutations(
+    cell: &mut HexCell,
+    species_catalog: &mut Vec<Species>,
+    predation_matrix: &mut HashMap<(Uuid, Uuid), PredationEntry>,
+    species_tree: &mut HashMap<Uuid, Option<Uuid>>,
+) -> Vec<MutationEvent> {
+    let mut mutations = Vec::new();
+    let mut rng = rand::thread_rng();
+
+    let pop_data: Vec<(Uuid, f64, u32)> = cell
+        .populations
+        .iter()
+        .map(|p| (p.species_id, p.count, p.hunting_quota))
+        .collect();
+
+    for (species_id, count, _) in &pop_data {
+        let species = match find_species(species_catalog, species_id) {
+            Some(s) => s.clone(),
+            None => continue,
+        };
+
+        let k = species.max_population as f64;
+        if count / k <= 0.7 {
+            continue;
+        }
+
+        if rng.gen::<f64>() > 0.3 {
+            continue;
+        }
+
+        let num_mutations = rng.gen_range(1..=3);
+        let mut mutated_positions: Vec<usize> = (0..GENE_COUNT).collect();
+        for i in (1..mutated_positions.len()).rev() {
+            let j = rng.gen_range(0..=i);
+            mutated_positions.swap(i, j);
+        }
+        let selected_positions: Vec<usize> = mutated_positions[..num_mutations].to_vec();
+
+        let mut new_genes = species.genes.clone();
+        for &pos in &selected_positions {
+            let noise = gaussian_noise(&mut rng, 0.1);
+            new_genes[pos] = (new_genes[pos] + noise).clamp(-2.0, 2.0);
+        }
+
+        let child_id = Uuid::new_v4();
+        let child_name = format!("{}-mut-{}", species.name, &child_id.to_string()[..6]);
+
+        let mut child_species = Species {
+            id: child_id,
+            name: child_name.clone(),
+            trophic_level: species.trophic_level.clone(),
+            base_reproduction_rate: species.base_reproduction_rate,
+            energy_requirement: species.energy_requirement,
+            competitiveness: species.competitiveness,
+            temp_range: species.temp_range,
+            humidity_range: species.humidity_range,
+            max_population: species.max_population,
+            genes: new_genes,
+            parent_species_id: Some(*species_id),
+            is_artificial: false,
+        };
+
+        child_species.derive_attributes_from_genes();
+
+        for ((pred_id, prey_id), entry) in predation_matrix.iter() {
+            if pred_id == species_id || prey_id == species_id {
+                predation_matrix.insert((child_id, *prey_id), entry.clone());
+                predation_matrix.insert((*pred_id, child_id), entry.clone());
+            }
+        }
+
+        species_catalog.push(child_species);
+        species_tree.insert(child_id, Some(*species_id));
+
+        let split_count = count * 0.1;
+        if split_count < 5.0 {
+            continue;
+        }
+
+        for pop in &mut cell.populations {
+            if pop.species_id == *species_id {
+                pop.count -= split_count;
+            }
+        }
+
+        cell.populations.push(Population {
+            species_id: child_id,
+            count: split_count,
+            biomass: split_count * 0.5,
+            protected: false,
+            hunting_quota: 0,
+            introduced_by: None,
+        });
+
+        mutations.push(MutationEvent {
+            parent_species_id: *species_id,
+            child_species_id: child_id,
+            child_name,
+            cell: (cell.q, cell.r),
+            mutated_genes: selected_positions,
+            is_artificial: false,
+        });
+    }
+
+    mutations
+}
+
+pub fn perform_directed_breeding(
+    cell: &mut HexCell,
+    species_catalog: &mut Vec<Species>,
+    predation_matrix: &mut HashMap<(Uuid, Uuid), PredationEntry>,
+    species_tree: &mut HashMap<Uuid, Option<Uuid>>,
+    species_id: &Uuid,
+    enhance_genes: &[usize],
+) -> Result<MutationEvent, String> {
+    let species = match find_species(species_catalog, species_id) {
+        Some(s) => s.clone(),
+        None => return Err("Species not found".to_string()),
+    };
+
+    if enhance_genes.len() < 1 || enhance_genes.len() > 2 {
+        return Err("Must specify 1-2 gene positions to enhance".to_string());
+    }
+
+    for &pos in enhance_genes {
+        if pos >= GENE_COUNT {
+            return Err(format!("Gene position {} out of range (0-{})", pos, GENE_COUNT - 1));
+        }
+    }
+
+    let mut new_genes = species.genes.clone();
+    for &pos in enhance_genes {
+        new_genes[pos] = (new_genes[pos] + 0.2).clamp(-2.0, 2.0);
+    }
+
+    let mut rng = rand::thread_rng();
+    let mut penalty_positions: Vec<usize> = (0..GENE_COUNT)
+        .filter(|p| !enhance_genes.contains(p))
+        .collect();
+    for i in (1..penalty_positions.len()).rev() {
+        let j = rng.gen_range(0..=i);
+        penalty_positions.swap(i, j);
+    }
+    let num_penalties = rng.gen_range(1..=2).min(penalty_positions.len());
+    for &pos in &penalty_positions[..num_penalties] {
+        new_genes[pos] = (new_genes[pos] - 0.1).clamp(-2.0, 2.0);
+    }
+
+    let child_id = Uuid::new_v4();
+    let child_name = format!("{}-bred-{}", species.name, &child_id.to_string()[..6]);
+
+    let mut child_species = Species {
+        id: child_id,
+        name: child_name.clone(),
+        trophic_level: species.trophic_level.clone(),
+        base_reproduction_rate: species.base_reproduction_rate,
+        energy_requirement: species.energy_requirement,
+        competitiveness: species.competitiveness,
+        temp_range: species.temp_range,
+        humidity_range: species.humidity_range,
+        max_population: species.max_population,
+        genes: new_genes,
+        parent_species_id: Some(*species_id),
+        is_artificial: true,
+    };
+
+    child_species.derive_attributes_from_genes();
+
+    for ((pred_id, prey_id), entry) in predation_matrix.iter() {
+        if pred_id == species_id || prey_id == species_id {
+            predation_matrix.insert((child_id, *prey_id), entry.clone());
+            predation_matrix.insert((*pred_id, child_id), entry.clone());
+        }
+    }
+
+    let all_mutated: Vec<usize> = enhance_genes
+        .iter()
+        .chain(penalty_positions[..num_penalties].iter())
+        .copied()
+        .collect();
+
+    species_catalog.push(child_species);
+    species_tree.insert(child_id, Some(*species_id));
+
+    let split_count: f64 = cell
+        .populations
+        .iter()
+        .find(|p| &p.species_id == species_id)
+        .map(|p| p.count * 0.1)
+        .unwrap_or(0.0);
+
+    if split_count >= 5.0 {
+        for pop in &mut cell.populations {
+            if &pop.species_id == species_id {
+                pop.count -= split_count;
+            }
+        }
+
+        cell.populations.push(Population {
+            species_id: child_id,
+            count: split_count,
+            biomass: split_count * 0.5,
+            protected: false,
+            hunting_quota: 0,
+            introduced_by: None,
+        });
+    }
+
+    Ok(MutationEvent {
+        parent_species_id: *species_id,
+        child_species_id: child_id,
+        child_name,
+        cell: (cell.q, cell.r),
+        mutated_genes: all_mutated,
+        is_artificial: true,
+    })
 }

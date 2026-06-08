@@ -4,7 +4,22 @@ export type TrophicLevel = 'Producer' | 'PrimaryConsumer' | 'SecondaryConsumer' 
 
 export type GameStatus = 'Waiting' | 'Running' | 'Finished';
 
-export type PlayerActionType = 'IntroduceSpecies' | 'HabitatConversion' | 'HuntingQuota' | 'SpeciesProtection' | 'BioInvasion';
+export type PlayerActionType = 'IntroduceSpecies' | 'HabitatConversion' | 'HuntingQuota' | 'SpeciesProtection' | 'BioInvasion' | 'DirectedBreeding';
+
+export const GENE_NAMES: string[] = [
+  'Fertility',
+  'ColdTolerance',
+  'HeatTolerance',
+  'DroughtTolerance',
+  'Competitiveness',
+  'Camouflage',
+  'Speed',
+  'BodySize',
+  'Toxicity',
+  'Symbiosis',
+  'Migration',
+  'DiseaseResistance',
+];
 
 export interface Species {
   id: string;
@@ -16,6 +31,9 @@ export interface Species {
   temp_range: [number, number];
   humidity_range: [number, number];
   max_population: number;
+  genes: number[];
+  parent_species_id: string | null;
+  is_artificial: boolean;
 }
 
 export interface Population {
@@ -91,14 +109,16 @@ export interface GameState {
   max_turns: number;
   max_players: number;
   status: GameStatus;
+  species_tree: Record<string, string | null>;
 }
 
 export interface PlayerAction {
-  type: 'introduce_species' | 'convert_habitat' | 'set_hunting_quota' | 'protect_species' | 'bio_invasion';
+  type: 'introduce_species' | 'convert_habitat' | 'set_hunting_quota' | 'protect_species' | 'bio_invasion' | 'directed_breeding';
   cell: [number, number];
   species_id?: string;
   target_biome?: Biome;
   quota?: number;
+  enhance_genes?: number[];
 }
 
 export interface PopulationChange {
@@ -120,12 +140,22 @@ export interface TerritoryChange {
   new_owner: string | null;
 }
 
+export interface MutationEvent {
+  parent_species_id: string;
+  child_species_id: string;
+  child_name: string;
+  cell: [number, number];
+  mutated_genes: number[];
+  is_artificial: boolean;
+}
+
 export interface TurnResult {
   turn: number;
   population_changes: PopulationChange[];
   collapse_events: CollapseEvent[];
   climate_events: ClimateEvent[];
   territory_changes: TerritoryChange[];
+  mutation_events: MutationEvent[];
 }
 
 export interface PopulationHistoryEntry {
@@ -168,6 +198,7 @@ export const ACTION_COSTS: Record<PlayerActionType, number> = {
   HuntingQuota: 2,
   SpeciesProtection: 3,
   BioInvasion: 10,
+  DirectedBreeding: 25,
 };
 
 export interface GameSnapshot {

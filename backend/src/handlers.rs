@@ -14,7 +14,7 @@ use crate::game::{
 };
 use crate::models::{
     GameStatus, GameState, Player, PlayerAction, PlayerActionType, Population, TrophicLevel,
-    TurnResult, ClimateState,
+    TurnResult, ClimateState, MutationEvent,
 };
 
 pub struct AppState {
@@ -65,6 +65,11 @@ pub async fn create_game(
     let cells = generate_map(body.max_players as usize, 5);
     let (species_catalog, predation_matrix) = initialize_species_catalog();
 
+    let mut species_tree = HashMap::new();
+    for species in &species_catalog {
+        species_tree.insert(species.id, species.parent_species_id);
+    }
+
     let game = GameState {
         id: game_id,
         name: body.name.clone(),
@@ -77,6 +82,7 @@ pub async fn create_game(
         max_turns: 50,
         max_players: body.max_players,
         status: GameStatus::Waiting,
+        species_tree,
     };
 
     let mut games = data.games.lock().unwrap();
@@ -124,6 +130,7 @@ pub async fn join_game(
     actions_remaining.insert(PlayerActionType::HuntingQuota, 3);
     actions_remaining.insert(PlayerActionType::SpeciesProtection, 2);
     actions_remaining.insert(PlayerActionType::BioInvasion, 1);
+    actions_remaining.insert(PlayerActionType::DirectedBreeding, 2);
 
     let player = Player {
         id: player_id,

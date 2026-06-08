@@ -1,5 +1,5 @@
 import React, { useState, MutableRefObject } from 'react';
-import { GameState, HexCell, Biome, PlayerActionType, ACTION_COSTS, TrophicLevel } from '../types';
+import { GameState, HexCell, Biome, PlayerActionType, ACTION_COSTS, TrophicLevel, GENE_NAMES } from '../types';
 import { WebSocketManager, submitAction } from '../api';
 
 interface ActionPanelProps {
@@ -117,6 +117,8 @@ export default function ActionPanel({ gameState, playerId, selectedCell, wsRef, 
   const [selectedBiome, setSelectedBiome] = useState<Biome>('Grassland');
   const [quotaValue, setQuotaValue] = useState('5');
   const [actionError, setActionError] = useState<string | null>(null);
+  const [breedGene1, setBreedGene1] = useState<number>(0);
+  const [breedGene2, setBreedGene2] = useState<number | null>(null);
 
   const player = gameState.players[playerId];
   if (!player) return null;
@@ -186,6 +188,21 @@ export default function ActionPanel({ gameState, playerId, selectedCell, wsRef, 
           type: 'bio_invasion' as const,
           cell: [selectedCell.q, selectedCell.r] as [number, number],
           species_id: selectedSpecies,
+        };
+        if (wsRef.current) {
+          wsRef.current.sendAction(action);
+        } else {
+          await submitAction(gameState.id, playerId, action);
+        }
+      } else if (actionType === 'directed_breeding' && selectedSpecies) {
+        const enhanceGenes = breedGene2 !== null
+          ? [breedGene1, breedGene2]
+          : [breedGene1];
+        const action = {
+          type: 'directed_breeding' as const,
+          cell: [selectedCell.q, selectedCell.r] as [number, number],
+          species_id: selectedSpecies,
+          enhance_genes: enhanceGenes,
         };
         if (wsRef.current) {
           wsRef.current.sendAction(action);
@@ -340,6 +357,57 @@ export default function ActionPanel({ gameState, playerId, selectedCell, wsRef, 
           </button>
           <span style={styles.cost}>💰 {ACTION_COSTS.BioInvasion}</span>
           <span style={styles.remaining}>×{remaining.BioInvasion}</span>
+        </div>
+      </div>
+
+      <div style={styles.divider} />
+
+      <div style={styles.group}>
+        <span style={styles.groupLabel}>Directed Breeding</span>
+        <select
+          style={{ ...styles.select, minWidth: '120px' }}
+          value={selectedSpecies}
+          onChange={e => setSelectedSpecies(e.target.value)}
+        >
+          <option value="">Select species...</option>
+          {allSpeciesInCell.map(s => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+        <div style={styles.row}>
+          <select
+            style={{ ...styles.select, fontSize: '10px', padding: '4px 6px' }}
+            value={breedGene1}
+            onChange={e => setBreedGene1(parseInt(e.target.value))}
+          >
+            {GENE_NAMES.map((name, i) => (
+              <option key={i} value={i}>{name}</option>
+            ))}
+          </select>
+          <select
+            style={{ ...styles.select, fontSize: '10px', padding: '4px 6px', width: '50px' }}
+            value={breedGene2 === null ? '' : breedGene2}
+            onChange={e => setBreedGene2(e.target.value === '' ? null : parseInt(e.target.value))}
+          >
+            <option value="">(none)</option>
+            {GENE_NAMES.map((name, i) => (
+              <option key={i} value={i}>{name}</option>
+            ))}
+          </select>
+        </div>
+        <div style={styles.row}>
+          <button
+            style={{
+              ...styles.btn,
+              ...(canAfford('DirectedBreeding') && selectedSpecies && isOwnCell ? styles.btnWarn : styles.btnDisabled),
+            }}
+            onClick={() => executeAction('directed_breeding')}
+            disabled={!canAfford('DirectedBreeding') || !selectedSpecies || !isOwnCell}
+          >
+            &#x2692; Breed
+          </button>
+          <span style={styles.cost}>💰 {ACTION_COSTS.DirectedBreeding}</span>
+          <span style={styles.remaining}>×{remaining.DirectedBreeding || 0}</span>
         </div>
       </div>
 

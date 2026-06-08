@@ -95,68 +95,54 @@ pub fn initialize_species_catalog() -> (Vec<Species>, HashMap<(Uuid, Uuid), Pred
 
     let mut id_map: HashMap<String, Uuid> = HashMap::new();
 
-    for (name, repr, energy, comp, temp, humid, max_pop) in &producers {
-        let id = Uuid::new_v4();
-        id_map.insert(name.to_string(), id);
-        catalog.push(Species {
-            id,
-            name: name.to_string(),
-            trophic_level: TrophicLevel::Producer,
-            base_reproduction_rate: *repr,
-            energy_requirement: *energy,
-            competitiveness: *comp,
-            temp_range: *temp,
-            humidity_range: *humid,
-            max_population: *max_pop,
-        });
-    }
+    let all_species: Vec<(&str, f64, f64, f64, (f64, f64), (f64, f64), u32, TrophicLevel)> = producers
+        .iter()
+        .map(|(n, r, e, c, t, h, m)| (*n, *r, *e, *c, *t, *h, *m, TrophicLevel::Producer))
+        .chain(
+            primary_consumers
+                .iter()
+                .map(|(n, r, e, c, t, h, m)| (*n, *r, *e, *c, *t, *h, *m, TrophicLevel::PrimaryConsumer)),
+        )
+        .chain(
+            secondary_consumers
+                .iter()
+                .map(|(n, r, e, c, t, h, m)| (*n, *r, *e, *c, *t, *h, *m, TrophicLevel::SecondaryConsumer)),
+        )
+        .chain(
+            decomposers
+                .iter()
+                .map(|(n, r, e, c, t, h, m)| (*n, *r, *e, *c, *t, *h, *m, TrophicLevel::Decomposer)),
+        )
+        .collect();
 
-    for (name, repr, energy, comp, temp, humid, max_pop) in &primary_consumers {
+    for (name, repr, energy, comp, temp, humid, max_pop, trophic) in &all_species {
         let id = Uuid::new_v4();
         id_map.insert(name.to_string(), id);
-        catalog.push(Species {
-            id,
-            name: name.to_string(),
-            trophic_level: TrophicLevel::PrimaryConsumer,
-            base_reproduction_rate: *repr,
-            energy_requirement: *energy,
-            competitiveness: *comp,
-            temp_range: *temp,
-            humidity_range: *humid,
-            max_population: *max_pop,
-        });
-    }
 
-    for (name, repr, energy, comp, temp, humid, max_pop) in &secondary_consumers {
-        let id = Uuid::new_v4();
-        id_map.insert(name.to_string(), id);
-        catalog.push(Species {
-            id,
-            name: name.to_string(),
-            trophic_level: TrophicLevel::SecondaryConsumer,
-            base_reproduction_rate: *repr,
-            energy_requirement: *energy,
-            competitiveness: *comp,
-            temp_range: *temp,
-            humidity_range: *humid,
-            max_population: *max_pop,
-        });
-    }
+        let mut genes = vec![0.5; GENE_COUNT];
+        genes[0] = (repr - 0.01) / 0.30;
+        genes[1] = (temp.0.abs()) / 40.0;
+        genes[2] = (temp.1 - 10.0) / 40.0;
+        genes[3] = if humid.0 < 30.0 { 0.8 } else if humid.0 < 50.0 { 0.5 } else { 0.2 };
+        genes[4] = comp;
+        genes[7] = (max_pop as f64 - 100.0) / 2000.0;
 
-    for (name, repr, energy, comp, temp, humid, max_pop) in &decomposers {
-        let id = Uuid::new_v4();
-        id_map.insert(name.to_string(), id);
-        catalog.push(Species {
+        let mut species = Species {
             id,
             name: name.to_string(),
-            trophic_level: TrophicLevel::Decomposer,
+            trophic_level: trophic.clone(),
             base_reproduction_rate: *repr,
             energy_requirement: *energy,
             competitiveness: *comp,
             temp_range: *temp,
             humidity_range: *humid,
             max_population: *max_pop,
-        });
+            genes,
+            parent_species_id: None,
+            is_artificial: false,
+        };
+        species.derive_attributes_from_genes();
+        catalog.push(species);
     }
 
     let mut predation = HashMap::new();
@@ -201,6 +187,7 @@ pub fn process_turn(game: &mut GameState) -> TurnResult {
     let mut collapse_events = Vec::new();
     let mut climate_events = Vec::new();
     let mut territory_changes = Vec::new();
+    let mut mutation_events = Vec::new();
 
     let cell_keys: Vec<(i32, i32)> = game.cells.keys().cloned().collect();
 
@@ -254,6 +241,26 @@ pub fn process_turn(game: &mut GameState) -> TurnResult {
         if let Some(cell) = game.cells.get_mut(key) {
             let changes = engine::compute_cell_populations(&species_catalog, &predation_matrix, cell);
             pop_changes.extend(changes);
+        }
+    }
+
+    for key in &cell_keys {
+        if let Some(cell) = game.cells.get_mut(key) {
+            let changes = engine::apply_natural_selection(cell, &game.species_catalog);
+            pop_changes.extend(changes);
+        }
+    }
+
+    let cell_keys_clone = cell_keys.clone();
+    for key in &cell_keys_clone {
+        if let Some(cell) = game.cells.get_mut(key) {
+            let mutations = engine::try_mutations(
+                cell,
+                &mut game.species_catalog,
+                &mut game.predation_matrix,
+                &mut game.species_tree,
+            );
+            mutation_events.extend(mutations);
         }
     }
 
@@ -345,6 +352,7 @@ pub fn process_turn(game: &mut GameState) -> TurnResult {
         actions.insert(PlayerActionType::HuntingQuota, 3);
         actions.insert(PlayerActionType::SpeciesProtection, 2);
         actions.insert(PlayerActionType::BioInvasion, 1);
+        actions.insert(PlayerActionType::DirectedBreeding, 2);
         player.actions_remaining = actions;
     }
 
@@ -381,6 +389,7 @@ pub fn process_turn(game: &mut GameState) -> TurnResult {
         collapse_events,
         climate_events,
         territory_changes,
+        mutation_events,
     }
 }
 
@@ -405,6 +414,7 @@ pub fn execute_player_action(
         PlayerAction::SetHuntingQuota { .. } => PlayerActionType::HuntingQuota,
         PlayerAction::ProtectSpecies { .. } => PlayerActionType::SpeciesProtection,
         PlayerAction::BioInvasion { .. } => PlayerActionType::BioInvasion,
+        PlayerAction::DirectedBreeding { .. } => PlayerActionType::DirectedBreeding,
     };
 
     let remaining = player
@@ -422,6 +432,7 @@ pub fn execute_player_action(
         PlayerAction::SetHuntingQuota { .. } => 5,
         PlayerAction::ProtectSpecies { .. } => 8,
         PlayerAction::BioInvasion { .. } => 20,
+        PlayerAction::DirectedBreeding { .. } => 25,
     };
 
     if player.resource_points < cost {
@@ -524,6 +535,27 @@ pub fn execute_player_action(
                 hunting_quota: 0,
                 introduced_by: Some(player_id),
             });
+        }
+        PlayerAction::DirectedBreeding { cell, species_id, enhance_genes } => {
+            let (q, r) = *cell;
+            let c = game
+                .cells
+                .get_mut(&(q, r))
+                .ok_or("Cell not found")?;
+            if c.owner_id != Some(player_id) {
+                return Err("You don't control this cell".to_string());
+            }
+            if !c.populations.iter().any(|p| &p.species_id == species_id) {
+                return Err("Species not present in cell".to_string());
+            }
+            engine::perform_directed_breeding(
+                c,
+                &mut game.species_catalog,
+                &mut game.predation_matrix,
+                &mut game.species_tree,
+                species_id,
+                enhance_genes,
+            )?;
         }
     }
 

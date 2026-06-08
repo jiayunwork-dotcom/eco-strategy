@@ -278,6 +278,9 @@ export default function SpeciesPanel({ cell, speciesCatalog, players, population
                 {pop.hunting_quota > 0 && (
                   <span style={{ ...styles.tag, ...styles.tagHunting }}>🎯 Quota: {pop.hunting_quota}</span>
                 )}
+                {species.is_artificial && (
+                  <span style={{ ...styles.tag, background: 'rgba(243, 156, 18, 0.15)', color: '#f39c12' }}>&#x2692; Bred</span>
+                )}
               </div>
             </div>
           );

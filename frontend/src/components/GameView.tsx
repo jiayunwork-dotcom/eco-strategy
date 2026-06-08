@@ -8,6 +8,7 @@ import ActionPanel from './ActionPanel';
 import ClimateAlert from './ClimateAlert';
 import TurnResultModal from './TurnResultModal';
 import FoodWebGraph from './FoodWebGraph';
+import EvolutionPanel from './EvolutionPanel';
 
 interface GameViewProps {
   gameState: GameState;
@@ -99,6 +100,27 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#8899aa',
     zIndex: 10,
   },
+  tabContainer: {
+    display: 'flex',
+    borderBottom: '1px solid #1a3a5c',
+  },
+  tab: {
+    flex: 1,
+    padding: '8px 0',
+    textAlign: 'center' as const,
+    fontSize: '11px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: '2px solid transparent',
+    color: '#5a7a9a',
+    transition: 'all 0.15s',
+  },
+  tabActive: {
+    color: '#2ecc71',
+    borderBottomColor: '#2ecc71',
+  },
 };
 
 export default function GameView({
@@ -111,6 +133,7 @@ export default function GameView({
   onRefresh,
 }: GameViewProps) {
   const [selectedCell, setSelectedCell] = useState<HexCell | null>(null);
+  const [sidebarTab, setSidebarTab] = useState<'species' | 'evolution'>('species');
 
   const currentPlayer = gameState.players[playerId];
   const isRunning = gameState.status === 'Running';
@@ -145,7 +168,7 @@ export default function GameView({
             {currentPlayer && (
               <div style={{ marginTop: '4px', fontSize: '12px' }}>
                 Resources: <span style={{ color: '#f39c12', fontWeight: 600 }}>{currentPlayer.resource_points}</span>
-                {' · '}Actions: <span style={{ color: '#3498db', fontWeight: 600 }}>{currentPlayer.actions_remaining.IntroduceSpecies + currentPlayer.actions_remaining.HuntingQuota + currentPlayer.actions_remaining.SpeciesProtection + currentPlayer.actions_remaining.BioInvasion + currentPlayer.actions_remaining.HabitatConversion}</span>
+                {' · '}Actions: <span style={{ color: '#3498db', fontWeight: 600 }}>{currentPlayer.actions_remaining.IntroduceSpecies + currentPlayer.actions_remaining.HuntingQuota + currentPlayer.actions_remaining.SpeciesProtection + currentPlayer.actions_remaining.BioInvasion + currentPlayer.actions_remaining.HabitatConversion + (currentPlayer.actions_remaining.DirectedBreeding || 0)}</span>
               </div>
             )}
             {isRunning && currentPlayer?.is_alive && (
@@ -163,18 +186,38 @@ export default function GameView({
         </div>
 
         <div style={styles.sidebar}>
-          <SpeciesPanel
-            cell={selectedCell}
-            speciesCatalog={gameState.species_catalog}
-            players={gameState.players}
-            populationHistory={populationHistory}
-          />
-          {selectedCell && (
-            <FoodWebGraph
-              speciesCatalog={gameState.species_catalog}
-              populations={selectedCell.populations}
-              predationMatrix={gameState.predation_matrix}
-            />
+          <div style={styles.tabContainer}>
+            <button
+              style={{ ...styles.tab, ...(sidebarTab === 'species' ? styles.tabActive : {}) }}
+              onClick={() => setSidebarTab('species')}
+            >
+              Species
+            </button>
+            <button
+              style={{ ...styles.tab, ...(sidebarTab === 'evolution' ? styles.tabActive : {}) }}
+              onClick={() => setSidebarTab('evolution')}
+            >
+              Evolution
+            </button>
+          </div>
+          {sidebarTab === 'species' ? (
+            <>
+              <SpeciesPanel
+                cell={selectedCell}
+                speciesCatalog={gameState.species_catalog}
+                players={gameState.players}
+                populationHistory={populationHistory}
+              />
+              {selectedCell && (
+                <FoodWebGraph
+                  speciesCatalog={gameState.species_catalog}
+                  populations={selectedCell.populations}
+                  predationMatrix={gameState.predation_matrix}
+                />
+              )}
+            </>
+          ) : (
+            <EvolutionPanel gameState={gameState} />
           )}
         </div>
       </div>

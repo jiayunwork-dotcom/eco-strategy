@@ -216,7 +216,7 @@ pub struct PredationEntry {
     pub conversion_efficiency: f64,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum GameStatus {
     Waiting,
     Running,

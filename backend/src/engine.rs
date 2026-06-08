@@ -44,7 +44,8 @@ fn find_species<'a>(catalog: &'a [Species], id: &Uuid) -> Option<&'a Species> {
 }
 
 pub fn compute_cell_populations(
-    game: &GameState,
+    species_catalog: &[Species],
+    predation_matrix: &HashMap<(Uuid, Uuid), PredationEntry>,
     cell: &mut HexCell,
 ) -> Vec<PopulationChange> {
     let mut changes = Vec::new();
@@ -60,7 +61,7 @@ pub fn compute_cell_populations(
     let mut new_counts: HashMap<Uuid, f64> = HashMap::new();
 
     for pop in &cell.populations {
-        let species = match find_species(&game.species_catalog, &pop.species_id) {
+        let species = match find_species(species_catalog, &pop.species_id) {
             Some(s) => s,
             None => {
                 new_counts.insert(pop.species_id, pop.count);
@@ -83,12 +84,12 @@ pub fn compute_cell_populations(
             .iter()
             .filter(|p| {
                 p.species_id != pop.species_id
-                    && find_species(&game.species_catalog, &p.species_id)
+                    && find_species(species_catalog, &p.species_id)
                         .map(|s| s.trophic_level == species.trophic_level)
                         .unwrap_or(false)
             })
             .map(|p| {
-                let comp = find_species(&game.species_catalog, &p.species_id)
+                let comp = find_species(species_catalog, &p.species_id)
                     .map(|s| s.competitiveness)
                     .unwrap_or(0.5);
                 comp * p.count
@@ -96,8 +97,7 @@ pub fn compute_cell_populations(
             .sum();
         let competition = same_trophic_total / k;
 
-        let predation_loss: f64 = game
-            .predation_matrix
+        let predation_loss: f64 = predation_matrix
             .iter()
             .filter(|((predator_id, prey_id), _)| prey_id == &pop.species_id)
             .map(|((predator_id, _), entry)| {
@@ -118,7 +118,7 @@ pub fn compute_cell_populations(
             }
             TrophicLevel::PrimaryConsumer | TrophicLevel::SecondaryConsumer => {
                 let mut gain = 0.0;
-                for ((pred_id, prey_id), entry) in &game.predation_matrix {
+                for ((pred_id, prey_id), entry) in predation_matrix {
                     if pred_id == &pop.species_id {
                         let prey_count = species_counts.get(prey_id).copied().unwrap_or(0.0);
                         gain += entry.preference_weight * entry.conversion_efficiency * prey_count;

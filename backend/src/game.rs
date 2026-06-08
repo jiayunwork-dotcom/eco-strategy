@@ -247,9 +247,12 @@ pub fn process_turn(game: &mut GameState) -> TurnResult {
         game.climate.warning_events.clear();
     }
 
+    let species_catalog = game.species_catalog.clone();
+    let predation_matrix = game.predation_matrix.clone();
+
     for key in &cell_keys {
         if let Some(cell) = game.cells.get_mut(key) {
-            let changes = engine::compute_cell_populations(game, cell);
+            let changes = engine::compute_cell_populations(&species_catalog, &predation_matrix, cell);
             pop_changes.extend(changes);
         }
     }
@@ -288,15 +291,18 @@ pub fn process_turn(game: &mut GameState) -> TurnResult {
         }
     }
 
-    for player in game.players.values_mut() {
-        if !player.is_alive {
+    let player_ids: Vec<Uuid> = game.players.keys().cloned().collect();
+    let mut player_updates: Vec<(Uuid, bool, bool, usize)> = Vec::new();
+    for pid in &player_ids {
+        let is_alive = game.players.get(pid).map(|p| p.is_alive).unwrap_or(false);
+        if !is_alive {
             continue;
         }
 
         let player_cells: Vec<&HexCell> = game
             .cells
             .values()
-            .filter(|c| c.owner_id == Some(player.id))
+            .filter(|c| c.owner_id == Some(*pid))
             .collect();
 
         let collapsed_count = player_cells
@@ -304,14 +310,26 @@ pub fn process_turn(game: &mut GameState) -> TurnResult {
             .filter(|c| c.collapse_state.is_collapsed)
             .count();
 
-        if !player_cells.is_empty() && collapsed_count as f64 / player_cells.len() as f64 > 0.3 {
-            player.is_alive = false;
-        }
+        let should_eliminate = !player_cells.is_empty()
+            && collapsed_count as f64 / player_cells.len() as f64 > 0.3;
 
         let has_extinction = player_cells.iter().any(|c| {
-            let prev: Vec<&Population> = c.populations.iter().filter(|p| p.count <= 0.0).collect();
-            !prev.is_empty()
+            c.populations.iter().any(|p| p.count <= 0.0)
         });
+
+        player_updates.push((*pid, should_eliminate, has_extinction, player_cells.len()));
+    }
+
+    for (pid, should_eliminate, has_extinction, cell_count) in player_updates {
+        let player = match game.players.get_mut(&pid) {
+            Some(p) if p.is_alive => p,
+            _ => continue,
+        };
+
+        if should_eliminate {
+            player.is_alive = false;
+            continue;
+        }
 
         if has_extinction {
             player.stable_turns_count = 0;
@@ -319,7 +337,7 @@ pub fn process_turn(game: &mut GameState) -> TurnResult {
             player.stable_turns_count += 1;
         }
 
-        player.resource_points += (player_cells.len() as i32 * 3) + 10;
+        player.resource_points += (cell_count as i32 * 3) + 10;
 
         let mut actions = HashMap::new();
         actions.insert(PlayerActionType::IntroduceSpecies, 3);
@@ -645,20 +663,23 @@ pub fn check_victory(game: &GameState) -> Option<VictoryResult> {
 pub fn check_player_elimination(game: &mut GameState) -> Vec<Uuid> {
     let mut eliminated = Vec::new();
 
-    for player in game.players.values_mut() {
-        if !player.is_alive {
+    let player_ids: Vec<Uuid> = game.players.keys().cloned().collect();
+    let mut elim_data: Vec<(Uuid, bool)> = Vec::new();
+
+    for pid in &player_ids {
+        let is_alive = game.players.get(pid).map(|p| p.is_alive).unwrap_or(false);
+        if !is_alive {
             continue;
         }
 
         let player_cells: Vec<&HexCell> = game
             .cells
             .values()
-            .filter(|c| c.owner_id == Some(player.id))
+            .filter(|c| c.owner_id == Some(*pid))
             .collect();
 
         if player_cells.is_empty() {
-            player.is_alive = false;
-            eliminated.push(player.id);
+            elim_data.push((*pid, true));
             continue;
         }
 
@@ -668,8 +689,16 @@ pub fn check_player_elimination(game: &mut GameState) -> Vec<Uuid> {
             .count();
 
         if collapsed as f64 / player_cells.len() as f64 > 0.3 {
-            player.is_alive = false;
-            eliminated.push(player.id);
+            elim_data.push((*pid, true));
+        }
+    }
+
+    for (pid, should_elim) in elim_data {
+        if should_elim {
+            if let Some(player) = game.players.get_mut(&pid) {
+                player.is_alive = false;
+                eliminated.push(pid);
+            }
         }
     }
 
